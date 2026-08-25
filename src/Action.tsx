@@ -1,18 +1,23 @@
 import {Outcome} from "./Outcome";
-import { Stage } from "./Stage";
-import {Stat} from "./Stat";
+import {MoemonType} from "./MoemonType";
 
 export class Action {
     description: string;
-    stat: Stat|null;
+    // The elemental domain the scene calls for, or null if the action is
+    // mundane/risk-free and needs no roll at all.
+    domain: MoemonType | null;
     difficultyModifier: number;
-    skillModifier: number;
+    // How well the acting party member's (or the party's) type(s) match the domain.
+    typeModifier: number;
+    // The name of the party member performing the action, if any was identified.
+    actor: string | null;
 
-    constructor(description: string, stat: Stat|null, difficultyModifier: number, skillModifier: number) {
+    constructor(description: string, domain: MoemonType | null, difficultyModifier: number, typeModifier: number, actor: string | null) {
         this.description = description;
-        this.stat = stat;
+        this.domain = domain;
         this.difficultyModifier = difficultyModifier;
-        this.skillModifier = skillModifier;
+        this.typeModifier = typeModifier;
+        this.actor = actor;
     }
 
     // Method to simulate a dice roll
@@ -25,23 +30,5 @@ export class Action {
         const dieResult1: number = this.diceRoll();
         const dieResult2: number = this.diceRoll();
         return new Outcome(dieResult1, dieResult2, this);
-    }
-
-    fullDescription(): string {
-        if (this.stat) {
-            return `(${this.stat} ${this.difficultyModifier >= 0 ? ('+' + this.difficultyModifier) : (this.difficultyModifier < 0 ? this.difficultyModifier : '')}${this.skillModifier > 0 ? ` +${this.skillModifier}` : ''}) ${this.description}`;
-        } else {
-            return `${this.description}`;
-        }
-    }
-
-    render(stage: Stage) {
-        return (
-            <div>
-                <button>
-                    ({this.stat} {this.difficultyModifier >= 0 ? ('+' + this.difficultyModifier) : (this.difficultyModifier < 0 ? this.difficultyModifier : '')}${this.skillModifier > 0 ? ` +${this.skillModifier}` : ''}) {this.description}
-                </button>
-            </div>
-        );
     }
 }
