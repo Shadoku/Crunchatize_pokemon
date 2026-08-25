@@ -5,7 +5,7 @@
 project_name: "Crunchatize"
 
 # A short tagline to show in search.
-tagline: "Turn any chat into a simple, stat-driven RPG."
+tagline: "Turn any Moemon chat into a party- and situation-driven RPG."
 
 creator_notes: "
 Can't enjoy an organic role-playing narrative without the thrill of the meta?<br>
@@ -14,39 +14,39 @@ Worried you'll develop genuine feelings or exercise life-changing introspection 
 Crunchatize may be the stage for you!<br>
 <br>
 **What's it do?**<br>
-Adding this stage to a chat (from Chat Settings) will cause your every input to be distilled into a skill check against one of eight attributes. 
-Dice will be rolled and modifiers added to determine whether you succeed or fail.
+This build of Crunchatize is wired up to a Moemon (moe-anthropomorphized Pokémon) lorebook. Instead of grading every input against one of eight
+generic human attributes, it looks at what's actually in play: who's in your party, what type(s) they are, and what kind of scene you're in.
+Dice are still rolled and modifiers still added, but the modifier now comes from type matchups (is your Charizard breathing fire on a Grass-type
+challenge, or trying to put one out?) rather than a fixed Might/Grace/Brains-style skill check.
 <br><br>
 <img src=\"https://avatars.charhub.io/avatars/uploads/images/gallery/file/7564e258-4f34-4ebd-97d9-402ef0508c21/685eece8-d6c7-4a6a-8457-809c01040a11.png\" alt=\"Example Screenshot\" style=\"display: block; margin: auto; width: 40%; height: auto; max-width: 938px;\"/>
 <br><br>
-Unlike most chats, where you don't want the bot to speak or act for your character, 
-this stage asks you to forfeit some agency over the details of your actions; 
-the bot will be specifically instructed to take your skill check result and paraphrase your choices as it narrates, rather than accept your input as canon. 
+Unlike most chats, where you don't want the bot to speak or act for your character,
+this stage asks you to forfeit some agency over the details of your actions;
+the bot will be specifically instructed to take your check result and paraphrase your choices as it narrates, rather than accept your input as canon.
 As a result, you may find that you are better off simply describing the nature or attitude of the action you intend to take and allowing the bot to fill in the details.
 <br><br>
-The stage is vaguely inspired by \"Powered by the Apocalypse\" rules, where 2d6 are rolled and modifiers added or subtracted to arrive at 
-one of four degrees of success: failure, mixed success, straight success, and critical success. Failures and criticals grant experience, which slowly leads to a level up--increasing one of the stats you used 
-most during that level. And that's about it!
+The stage is vaguely inspired by \"Powered by the Apocalypse\" rules, where 2d6 are rolled and modifiers added or subtracted to arrive at
+one of four degrees of success: failure, mixed success, straight success, and critical success. There's no more XP grind or leveling; your
+'build' is just whichever moemon you've got with you.
 <br><br>
-There are eight stats, and they are all a bit nebulous and overlapping:<br>
-<ul>
-<li>Might - Strength and endurance<br>
-<li>Grace - Agility and composure<br>
-<li>Skill - Craft and deftness<br>
-<li>Brains - Knowledge and logic<br>
-<li>Wits - Instinct and awareness<br>
-<li>Charm - Allure and influence<br>
-<li>Heart - Determination and empathy<br>
-<li>Luck - Chance and fortune<br>
-</ul>
-<br>
-You can view console output to see the classification results that the stage is using to arrive at its skill and difficulty assessments. 
-These are zero-shot classifications, which are pretty naive and lack significant context; I am continuing to tweak and improve, 
+**Party tracking**<br>
+The stage keeps a little panel (visible alongside the chat) showing each player's current party. It fills in automatically as moemon are
+mentioned in the story - a companion character card, something you say you're sending out, something the narrator introduces - and you can
+also add or remove entries by hand at any time from the panel itself, in case the auto-detection guesses wrong.
+<br><br>
+When you take an action, if you name one of your own party members, that moemon is treated as the one acting, and their type(s) are checked
+against the elemental domain of the scene for a bonus or penalty. If you don't name anyone specific, your whole party chips in ambiently, at
+reduced strength. If nothing in the scene reads as elemental/risky at all, no roll happens - same as before.
+<br><br>
+You can view console output to see the classification results the stage uses to arrive at its domain and difficulty assessments.
+These are zero-shot classifications, which are pretty naive and lack significant context; I am continuing to tweak and improve,
 but it is pretty easy to skew the results through the language you use in your input.
 <br><br>
 I've tagged the stage NSFW, but there isn't anything in the stage that would render a wholesome chat inappropriate. However, my example bot is NSFW, and I'm sure other bots that attach this stage could be, too.
 <br><br>
 **Updates:**<br>
+08/25/2026 - Reworked the stage around a Moemon lorebook: party tracking (with a small panel UI for manual add/remove), and checks now driven by party type matchups and scene domain instead of the old eight-stat skill system. Leveling/XP removed.<br>
 06/26/2025 - Hugging Face CORS issues broke the stage for a few days; I wrote a new client for it.<br>
 08/05/2025 - Forced to update by Hugging Face.<br>
 07/18/2025 - Added a configurable difficulty modifier that applies to all rolls.<br>
@@ -77,7 +77,7 @@ visibility: 'PUBLIC'
 #   but leave the text input box.
 # 'FULLSCREEN' will make nothing below the header bar
 #   show except for your stage.
-position: 'NONE'
+position: 'ADJACENT'
 
 # Self-explanatory.
 tags:
@@ -86,7 +86,7 @@ tags:
   - 'Extension'
   - 'Add-on'
   - 'RPG'
-  - 'Stats'
+  - 'Pokemon'
 
 needs_config:
   false

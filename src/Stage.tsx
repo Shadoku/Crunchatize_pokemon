@@ -2,8 +2,11 @@ import {ReactElement} from "react";
 import {StageBase, StageResponse, InitialData, Message, Character, User} from "@chub-ai/stages-ts";
 import {LoadResponse} from "@chub-ai/stages-ts/dist/types/load";
 import {Action} from "./Action";
-import {Stat} from "./Stat"
 import {Outcome, Result, ResultDescription} from "./Outcome";
+import {MoemonType, TypeDomainDescription, bestEffectiveness, modifierForMultiplier} from "./MoemonType";
+import {getSpecies, findSpeciesMentions} from "./Lore";
+import {PartyMember, typesOf} from "./Party";
+import {PartyPanel} from "./PartyPanel";
 
 type MessageStateType = any;
 
@@ -19,24 +22,47 @@ type ChatStateType = any;
   yarn dev --host --mode staging
 */
 
-interface SaveState {
-    experience: number;
-    statUses: {[stat in Stat]: number};
-    stats: {[stat in Stat]: number};
+interface UserState {
+    // Moemon detected automatically from the character roster, the player's
+    // own messages, and narration. Tied to message state, since it should
+    // track the story's progression through the chat tree.
+    autoParty: PartyMember[];
     lastOutcome: Outcome|null;
     lastOutcomePrompt: string;
 }
 
+// Chat-wide (not tied to a branch) record of party members the player has
+// explicitly added or removed by hand via the party panel.
+interface ChatPartyState {
+    manualParty: PartyMember[];
+}
+
+const DOMAIN_HYPOTHESIS = 'The narrator\'s action principally draws upon {}.';
+const MUNDANE_LABEL = 'ordinary conversation or a risk-free action';
+const DOMAIN_MAPPING: {[key: string]: MoemonType|null} = Object.values(MoemonType).reduce((map, type) => {
+    map[TypeDomainDescription[type]] = type;
+    return map;
+}, {[MUNDANE_LABEL]: null} as {[key: string]: MoemonType|null});
+
+const DIFFICULTY_HYPOTHESIS = 'On a scale of 1-6, the difficulty of the narrator\'s actions is {}.';
+const DIFFICULTY_MAPPING: {[key: string]: number} = {
+    '1 (simple and safe)': 1000,
+    '2 (straightforward or fiddly)': 1,
+    '3 (complex or tricky)': 0,
+    '4 (challenging and risky)': -1,
+    '5 (arduous and dangerous)': -2,
+    '6 (virtually impossible)': -3
+};
+
 export class Stage extends StageBase<InitStateType, ChatStateType, MessageStateType, ConfigType> {
-    
-    readonly defaultStat: number = 0;
-    readonly levelThresholds: number[] = [2, 5, 8, 12, 16, 20, 25, 30, 35, 40, 45, 50, 55, 60, 65, 70, 75, 80, 85, 90, 95, 100];
 
     // message-level variables
-    userState: {[key: string]: SaveState} = {};
+    userState: {[key: string]: UserState} = {};
+
+    // chat-wide variables
+    chatState: {[anonymizedId: string]: ChatPartyState} = {};
 
     // other:
-    //player: User;
     users: {[key: string]: User} = {};
     characters: {[key: string]: Character} = {};
     globalModifier: number;
@@ -48,45 +74,96 @@ export class Stage extends StageBase<InitStateType, ChatStateType, MessageStateT
             characters,
             users,
             messageState,
+            chatState,
             config
         } = data;
         this.users = users;
         this.characters = characters;
-        console.log(this.users);
-        console.log(this.characters);
-        this.globalModifier = config.difficultyModifier ?? 0;
+        this.globalModifier = config?.difficultyModifier ?? 0;
+        this.chatState = chatState ?? {};
 
-        for (let user of Object.values(this.users)) {
+        for (const user of Object.values(this.users)) {
             this.userState[user.anonymizedId] = this.initializeUserState();
         }
         this.setStateFromMessageState(messageState);
+        this.seedPartyFromCharacters();
     }
 
-    initializeUserState(): SaveState {
+    initializeUserState(): UserState {
         return {
-            experience: 0,
-            statUses: this.clearStatMap(),
-            stats: this.clearStatMap(),
+            autoParty: [],
             lastOutcome: null,
             lastOutcomePrompt: ''
         }
     }
 
-    getUserState(anonymizedId: string): SaveState {
+    getUserState(anonymizedId: string): UserState {
         return this.userState[anonymizedId] ?? this.initializeUserState();
     }
 
-    clearStatMap() {
-        return {
-            [Stat.Might]: 0,
-            [Stat.Grace]: 0,
-            [Stat.Skill]: 0,
-            [Stat.Brains]: 0,
-            [Stat.Wits]: 0,
-            [Stat.Charm]: 0,
-            [Stat.Heart]: 0,
-            [Stat.Luck]: 0
+    // Any moemon character card already in the chat counts as a party member.
+    seedPartyFromCharacters() {
+        for (const character of Object.values(this.characters)) {
+            if (character.isRemoved) continue;
+            const species = getSpecies(character.name);
+            if (!species) continue;
+            for (const user of Object.values(this.users)) {
+                this.addAutoPartyMember(user.anonymizedId, species.name);
+            }
+        }
+    }
+
+    getManualParty(anonymizedId: string): PartyMember[] {
+        return this.chatState[anonymizedId]?.manualParty ?? [];
+    }
+
+    // The manual roster plus whatever's been auto-detected, deduped by species.
+    getFullParty(anonymizedId: string): PartyMember[] {
+        const manual = this.getManualParty(anonymizedId);
+        const seen = new Set(manual.map(member => member.species.toLowerCase()));
+        const combined = [...manual];
+        for (const member of this.getUserState(anonymizedId).autoParty) {
+            if (!seen.has(member.species.toLowerCase())) {
+                combined.push(member);
+                seen.add(member.species.toLowerCase());
+            }
+        }
+        return combined;
+    }
+
+    addAutoPartyMember(anonymizedId: string, species: string) {
+        const alreadyKnown = this.getFullParty(anonymizedId).some(member => member.species.toLowerCase() === species.toLowerCase());
+        if (!alreadyKnown) {
+            const userState = this.getUserState(anonymizedId);
+            userState.autoParty = [...userState.autoParty, {species, source: 'auto'}];
+        }
+    }
+
+    addAutoPartyMembersFromText(anonymizedId: string, text: string) {
+        for (const species of findSpeciesMentions(text)) {
+            this.addAutoPartyMember(anonymizedId, species);
+        }
+    }
+
+    // Adds a moemon to the player's roster by hand; persisted immediately via
+    // the messenger, since this happens outside the normal lifecycle hooks.
+    async addPartyMember(anonymizedId: string, species: string): Promise<void> {
+        if (!getSpecies(species)) return;
+        const existing = this.getManualParty(anonymizedId);
+        if (existing.some(member => member.species.toLowerCase() === species.toLowerCase())) return;
+        this.chatState = {
+            ...this.chatState,
+            [anonymizedId]: {manualParty: [...existing, {species, source: 'manual'} as PartyMember]}
         };
+        await this.messenger.updateChatState(this.chatState);
+    }
+
+    async removePartyMember(anonymizedId: string, species: string): Promise<void> {
+        const manualParty = this.getManualParty(anonymizedId).filter(member => member.species.toLowerCase() !== species.toLowerCase());
+        this.chatState = {...this.chatState, [anonymizedId]: {manualParty}};
+        const userState = this.getUserState(anonymizedId);
+        userState.autoParty = userState.autoParty.filter(member => member.species.toLowerCase() !== species.toLowerCase());
+        await this.messenger.updateChatState(this.chatState);
     }
 
     async load(): Promise<Partial<LoadResponse<InitStateType, ChatStateType, MessageStateType>>> {
@@ -94,7 +171,7 @@ export class Stage extends StageBase<InitStateType, ChatStateType, MessageStateT
             success: true,
             error: null,
             initState: null,
-            chatState: null,
+            chatState: this.chatState,
         };
     }
 
@@ -109,89 +186,59 @@ export class Stage extends StageBase<InitStateType, ChatStateType, MessageStateT
             promptForId
         } = userMessage;
 
-        let errorMessage: string|null = null;
+        const errorMessage: string|null = null;
         let takenAction: Action|null = null;
         let finalContent: string|undefined = content;
 
         if (finalContent) {
-            let sequence = this.replaceTags(content,
+            this.addAutoPartyMembersFromText(anonymizedId, finalContent);
+
+            const sequence = this.replaceTags(content,
                 {"user": anonymizedId ? this.users[anonymizedId].name : '', "char": promptForId ? this.characters[promptForId].name : ''});
 
-            const statMapping:{[key: string]: string} = {
-                'hit, wrestle': 'Might',
-                'lift, throw, climb': 'Might',
-                'endure, physically intimidate': 'Might',
-                'jump, dodge, balance, dance, fall, land, sneak': 'Grace',
-                'aim, shoot': 'Skill',
-                'craft, lock-pick, pickpocket, repair': 'Skill',
-                'ride, steer': 'Skill',
-                'memorize, recall, solve, debate': 'Brains',
-                'strategize, plan, navigate': 'Brains',
-                'quip, trick': 'Wits',
-                'adapt, spot, hide': 'Wits',
-                'persuade, lie, entice, perform': 'Charm',
-                'resist, recover, empathize, comfort': 'Heart',
-                'gamble, hope, discover, guess': 'Luck',
-                'chat, rest, wait, idle': 'None'};
-            let topStat: Stat|null = null;
-            const statHypothesis = 'The narrator is doing one of the following: {}, or something similar.'
-            const statPromise = this.query({sequence: sequence, candidate_labels: Object.keys(statMapping), hypothesis_template: statHypothesis, multi_label: true });
+            // Kick both classifications off together; only the difficulty one needs awaiting first.
+            const domainPromise = this.query({sequence: sequence, candidate_labels: Object.keys(DOMAIN_MAPPING), hypothesis_template: DOMAIN_HYPOTHESIS, multi_label: true});
 
-            const difficultyMapping:{[key: string]: number} = {
-                '1 (simple and safe)': 1000,
-                '2 (straightforward or fiddly)': 1,
-                '3 (complex or tricky)': 0,
-                '4 (challenging and risky)': -1,
-                '5 (arduous and dangerous)': -2,
-                '6 (virtually impossible)': -3};
-            let difficultyRating:number = 0;
-            const difficultyHypothesis = 'On a scale of 1-6, the difficulty of the narrator\'s actions is {}.';
-            let difficultyResponse = await this.query({sequence: sequence, candidate_labels: Object.keys(difficultyMapping), hypothesis_template: difficultyHypothesis, multi_label: true });
-            console.log(`Difficulty modifier selected: ${difficultyMapping[difficultyResponse.labels[0]] + this.globalModifier}`);
+            let difficultyRating: number = 0;
+            const difficultyResponse = await this.query({sequence: sequence, candidate_labels: Object.keys(DIFFICULTY_MAPPING), hypothesis_template: DIFFICULTY_HYPOTHESIS, multi_label: true });
+            console.log(`Difficulty modifier selected: ${DIFFICULTY_MAPPING[difficultyResponse.labels[0]] + this.globalModifier}`);
             if (difficultyResponse && difficultyResponse.labels[0]) {
-                difficultyRating = difficultyMapping[difficultyResponse.labels[0]] + this.globalModifier;
+                difficultyRating = DIFFICULTY_MAPPING[difficultyResponse.labels[0]] + this.globalModifier;
             }
 
-            let statResponse = await statPromise;
-            if (statResponse && statResponse.labels && statResponse.scores[0] > 0.1 && statMapping[statResponse.labels[0]] != 'None') {
-                topStat = Stat[statMapping[statResponse.labels[0]] as keyof typeof Stat];
-                console.log(`Stat selected: ${topStat}`);
+            let domain: MoemonType|null = null;
+            const domainResponse = await domainPromise;
+            if (domainResponse && domainResponse.labels && domainResponse.scores[0] > 0.1) {
+                domain = DOMAIN_MAPPING[domainResponse.labels[0]];
+                console.log(`Domain selected: ${domain}`);
             }
 
-            if (topStat && difficultyRating < 1000) {
-                takenAction = new Action(finalContent, topStat, difficultyRating, this.getUserState(anonymizedId).stats[topStat]);
+            if (domain && difficultyRating < 1000) {
+                const party = this.getFullParty(anonymizedId);
+                const mentionedSpecies = findSpeciesMentions(sequence);
+                const actingSpecies = mentionedSpecies.find(name => party.some(member => member.species.toLowerCase() === name.toLowerCase()));
+
+                let typeModifier = 0;
+                let actor: string|null = null;
+                if (actingSpecies) {
+                    const member = party.find(member => member.species.toLowerCase() === actingSpecies.toLowerCase())!;
+                    actor = member.species;
+                    typeModifier = modifierForMultiplier(bestEffectiveness(typesOf(member), domain));
+                } else if (party.length > 0) {
+                    // No specific actor named; the party supports ambiently, at half strength.
+                    const bestMatch = Math.max(...party.map(member => bestEffectiveness(typesOf(member), domain as MoemonType)));
+                    typeModifier = Math.round(modifierForMultiplier(bestMatch) / 2);
+                }
+
+                takenAction = new Action(finalContent, domain, difficultyRating, typeModifier, actor);
             } else {
-                takenAction = new Action(finalContent, null, 0, 0);
+                takenAction = new Action(finalContent, null, 0, 0, null);
             }
         }
 
         if (takenAction) {
             this.setLastOutcome(anonymizedId, takenAction.determineSuccess());
             finalContent = this.getUserState(anonymizedId).lastOutcome?.getDescription();
-
-            if (takenAction.stat) {
-                this.getUserState(anonymizedId).statUses[takenAction.stat]++;
-            }
-
-            if (this.getUserState(anonymizedId).lastOutcome && [Result.Failure, Result.CriticalSuccess].includes(this.getUserState(anonymizedId).lastOutcome?.result ?? Result.None)) {
-                this.getUserState(anonymizedId).experience++;
-                let level = this.getLevel(anonymizedId);
-                if (this.getUserState(anonymizedId).experience == this.levelThresholds[level]) {
-                    const maxCount = Math.max(...Object.values(this.getUserState(anonymizedId).statUses));
-                    const maxStats = Object.keys(this.getUserState(anonymizedId).statUses)
-                            .filter((stat) => this.getUserState(anonymizedId).statUses[stat as Stat] === maxCount)
-                            .map((stat) => stat as Stat);
-                    let chosenStat = maxStats[Math.floor(Math.random() * maxStats.length)];
-                    console.log(`Before level up: ${this.getUserState(anonymizedId).stats[chosenStat]}`);
-                    this.getUserState(anonymizedId).stats[chosenStat]++;
-                    console.log(`After level up: ${this.getUserState(anonymizedId).stats[chosenStat]}`);
-                    finalContent += `\n##Welcome to level ${level + 2}!##\n#_${chosenStat}_ up!#`;
-
-                    this.getUserState(anonymizedId).statUses = this.clearStatMap();
-                } else {
-                    finalContent += `\n###${this.users[anonymizedId].name} has learned from this experience...###`
-                }
-            }
         }
 
         return {
@@ -203,50 +250,55 @@ export class Stage extends StageBase<InitStateType, ChatStateType, MessageStateT
             modifiedMessage: finalContent,
             systemMessage: null,
             error: errorMessage,
-            chatState: null,
+            chatState: this.chatState,
         };
-    }
-
-    getLevel(anonymizedId: string): number {
-        return Object.values(this.getUserState(anonymizedId).stats).reduce((acc, val) => acc + val, 0)
     }
 
     async afterResponse(botMessage: Message): Promise<Partial<StageResponse<ChatStateType, MessageStateType>>> {
 
-        let message = botMessage.content;
+        const message = botMessage.content;
 
-
-        Object.values(this.users).forEach(user => this.getUserState(user.anonymizedId).lastOutcomePrompt = '');
+        for (const user of Object.values(this.users)) {
+            this.addAutoPartyMembersFromText(user.anonymizedId, message);
+            this.getUserState(user.anonymizedId).lastOutcomePrompt = '';
+        }
 
         return {
             stageDirections: null,
             messageState: this.buildMessageState(),
             modifiedMessage: message.split(/---|\*\*\*|```|system:/i)[0].trim(),
             error: null,
-            systemMessage: '---\n```' +
-                Object.values(this.users).map(user =>
-                `${user.name} - Level ${this.getLevel(user.anonymizedId) + 1} (${this.getUserState(user.anonymizedId).experience}/${this.levelThresholds[this.getLevel(user.anonymizedId)]})\n` +
-                `${Object.keys(Stat).map(key => `${key}: ${this.getUserState(user.anonymizedId).stats[key as Stat]}`).join(' | ')}`).join('\n') +
-                '```',
-            chatState: null
+            systemMessage: this.buildPartySystemMessage(),
+            chatState: this.chatState
         };
     }
 
+    buildPartySystemMessage(): string {
+        const lines = Object.values(this.users).map(user => {
+            const party = this.getFullParty(user.anonymizedId);
+            const partyDescription = party.length > 0
+                ? party.map(member => `${member.species} (${typesOf(member).join('/') || '???'})`).join(', ')
+                : 'No moemon yet';
+            return `${user.name}'s Party: ${partyDescription}`;
+        });
+        return '---\n```' + lines.join('\n') + '```';
+    }
+
     setStateFromMessageState(messageState: MessageStateType) {
-        console.log('messageState:');
-        console.log(messageState);
-        for (let user of Object.values(this.users)) {
-            let userState = this.getUserState(user.anonymizedId);
-            userState.stats = this.clearStatMap();
+        for (const user of Object.values(this.users)) {
+            const userState = this.getUserState(user.anonymizedId);
             if (messageState != null) {
-                for (let stat in Stat) {
-                    userState.stats[stat as Stat] = messageState[user.anonymizedId]?.[stat] ?? messageState[stat] ?? this.defaultStat;
-                    userState.statUses[stat as Stat] = messageState[user.anonymizedId]?.[`use_${stat}`] ?? messageState[`use_${stat}`] ?? 0;
-                }
-                let lastOutcome = messageState[user.anonymizedId]?.['lastOutcome'] ?? messageState['lastOutcome'] ?? null;
+                const rawParty = messageState[user.anonymizedId]?.['autoParty'] ?? [];
+                userState.autoParty = (Array.isArray(rawParty) ? rawParty : [])
+                    .filter((member: any) => member && typeof member.species === 'string' && getSpecies(member.species))
+                    .map((member: any) => ({species: member.species, source: 'auto'}));
+                const lastOutcome = messageState[user.anonymizedId]?.['lastOutcome'] ?? null;
                 userState.lastOutcome = lastOutcome ? this.convertOutcome(lastOutcome) : null;
-                userState.lastOutcomePrompt = messageState[user.anonymizedId]?.['lastOutcomePrompt'] ?? messageState['lastOutcomePrompt'] ?? '';
-                userState.experience = messageState[user.anonymizedId]?.['experience'] ?? messageState['experience'] ?? 0;
+                userState.lastOutcomePrompt = messageState[user.anonymizedId]?.['lastOutcomePrompt'] ?? '';
+            } else {
+                userState.autoParty = [];
+                userState.lastOutcome = null;
+                userState.lastOutcomePrompt = '';
             }
             this.userState[user.anonymizedId] = userState;
         }
@@ -257,36 +309,31 @@ export class Stage extends StageBase<InitStateType, ChatStateType, MessageStateT
     }
 
     convertAction(input: any): Action {
-        return new Action(input['description'], input['stat'] as Stat, input['difficultyModifier'], input['skillModifier'])
+        return new Action(input['description'], input['domain'] ?? null, input['difficultyModifier'] ?? 0, input['typeModifier'] ?? 0, input['actor'] ?? null);
     }
 
     buildMessageState(): any {
-        let messageState: any = {};
-        for (let user of Object.values(this.users)) {
-            let userState: { [key: string]: any } = {};
-            for (let stat in Stat) {
-                userState[stat] = this.getUserState(user.anonymizedId).stats[stat as Stat] ?? this.defaultStat;
-                userState[`use_${stat}`] = this.getUserState(user.anonymizedId).statUses[stat as Stat] ?? 0;
-            }
-            userState['lastOutcome'] = this.getUserState(user.anonymizedId).lastOutcome ?? null;
-            userState['lastOutcomePrompt'] = this.getUserState(user.anonymizedId).lastOutcomePrompt ?? '';
-            userState['experience'] = this.getUserState(user.anonymizedId).experience ?? 0;
-
-            messageState[user.anonymizedId] = userState;
+        const messageState: any = {};
+        for (const user of Object.values(this.users)) {
+            const userState = this.getUserState(user.anonymizedId);
+            messageState[user.anonymizedId] = {
+                autoParty: userState.autoParty,
+                lastOutcome: userState.lastOutcome ?? null,
+                lastOutcomePrompt: userState.lastOutcomePrompt ?? ''
+            };
         }
-        console.log('buildMessageState:');
-        console.log(messageState);
         return messageState;
     }
 
     setLastOutcome(anonymizedId: string, outcome: Outcome|null) {
-        this.getUserState(anonymizedId).lastOutcome = outcome;
-        this.getUserState(anonymizedId).lastOutcomePrompt = '';
-        if (this.getUserState(anonymizedId).lastOutcome) {
-            this.getUserState(anonymizedId).lastOutcomePrompt += `{{user}} has chosen the following action: ${this.getUserState(anonymizedId).lastOutcome?.action.description ?? ''}\n`;
-            this.getUserState(anonymizedId).lastOutcomePrompt += `${ResultDescription[this.getUserState(anonymizedId).lastOutcome?.result ?? Result.None]}\n`
+        const userState = this.getUserState(anonymizedId);
+        userState.lastOutcome = outcome;
+        userState.lastOutcomePrompt = '';
+        if (userState.lastOutcome) {
+            userState.lastOutcomePrompt += `{{user}} has chosen the following action: ${userState.lastOutcome.action.description ?? ''}\n`;
+            userState.lastOutcomePrompt += `${ResultDescription[userState.lastOutcome.result ?? Result.None]}\n`
             if (Object.values(this.users).length > 1) {
-                this.getUserState(anonymizedId).lastOutcomePrompt += `Use third-person language for {{user}}.\n`;
+                userState.lastOutcomePrompt += `Use third-person language for {{user}}.\n`;
             }
         }
     }
@@ -314,7 +361,7 @@ export class Stage extends StageBase<InitStateType, ChatStateType, MessageStateT
 
             evtSource.addEventListener("complete", (e) => {
                 try {
-                    const data = JSON.parse(e.data);
+                    const data = JSON.parse((e as MessageEvent).data);
                     resolve(data);
                 } catch (exception) {
                     reject(exception);
@@ -359,7 +406,7 @@ export class Stage extends StageBase<InitStateType, ChatStateType, MessageStateT
     }
 
     render(): ReactElement {
-        return <></>;
+        return <PartyPanel stage={this} />;
     }
 
 }

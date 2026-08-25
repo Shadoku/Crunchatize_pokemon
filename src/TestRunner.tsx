@@ -41,10 +41,13 @@ export const TestStageRunner = <StageType extends StageBase<InitStateType, ChatS
         await stage.setState({someKey: 'A new value, even!'});
         refresh();
 
+        // Charizard is seeded into the party automatically from the character roster
+        // (see test-init.json); naming her here should make her the acting party member
+        // and pit her Fire typing against whatever domain the classifier picks for 'frozen'.
         const beforePromptResponse: Partial<StageResponse<ChatStateType, MessageStateType>> = await stage.beforePrompt({
             ...DEFAULT_MESSAGE, ...{
                 anonymizedId: "0",
-                content: "Hello, this is what happens when a human sends a message, but before it's sent to the model.",
+                content: "I have Charizard breathe fire on the frozen door blocking our path.",
                 isBot: false
             }
         });
@@ -65,18 +68,20 @@ export const TestStageRunner = <StageType extends StageBase<InitStateType, ChatS
             from breaking your test runner in many cases.
          ***/
         /*
+        // A wild moemon mentioned in narration (e.g. Squirtle) should be auto-detected
+        // and show up in the party panel afterward.
         const afterPromptResponse: Partial<StageResponse<ChatStateType, MessageStateType>> = await stage.afterResponse({
             ...DEFAULT_MESSAGE, ...{
             promptForId: null,
             anonymizedId: "2",
-            content: "Why yes hello, and this is what happens when a bot sends a response.",
+            content: "The ice shatters! A curious Squirtle pokes her head out from behind the wreckage and decides to tag along.",
             isBot: true}});
         console.assert(afterPromptResponse.error == null);
         refresh();
 
         const afterDelayedThing: Partial<StageResponse<ChatStateType, MessageStateType>> = await delayedTest(() => stage.beforePrompt({
             ...DEFAULT_MESSAGE, ...{
-            anonymizedId: "0", content: "Hello, and now the human is prompting again.", isBot: false, promptForId: null
+            anonymizedId: "0", content: "I ask Squirtle to scout ahead through the flooded tunnel.", isBot: false, promptForId: null
         }}), 5);
         console.assert(afterDelayedThing.error == null);
         refresh();
