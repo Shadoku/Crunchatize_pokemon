@@ -146,3 +146,6 @@ state_schema:
 # fields (a fresh extension_id, and this repo's own github_path) on the
 # next successful run.
 
+
+github_path: 'https://github.com/Shadoku/Crunchatize_pokemon'
+
