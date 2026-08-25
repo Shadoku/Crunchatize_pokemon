@@ -139,9 +139,10 @@ state_schema:
 #    you should not make or set this value.
 # github_path will be added if it does not exist. It is the URL of the repo.
 
-
-github_path: 'https://github.com/Lord-Raven/Crunchatize'
-
-
-extension_id: 'crunchatize-77a78ffcc6a6'
+# Cleared: this repo started as a copy of Lord-Raven's original Crunchatize
+# project and inherited that project's github_path/extension_id, which
+# pointed uploads at *their* chub.ai listing instead of a new one under
+# this repo's own account/token. The deploy workflow will regenerate both
+# fields (a fresh extension_id, and this repo's own github_path) on the
+# next successful run.
 

@@ -116,8 +116,20 @@ jobs:
         if: ${{ !contains(github.repository, 'template') }}
         env:
           CHUB_AUTH_TOKEN: ${{ secrets.CHUB_AUTH_TOKEN }}
-        run: |    
-          curl -H "CH-API-KEY: ${{ secrets.CHUB_AUTH_TOKEN }}" -F "file=@build.zip" https://api.chub.ai/extension/${{ env.STAGE_ID }}/upload
+        run: |
+          sudo apt-get install -y jq
+          HTTP_STATUS=$(curl -s -o upload_response.json -w "%{http_code}" -H "CH-API-KEY: ${{ secrets.CHUB_AUTH_TOKEN }}" -F "file=@build.zip" https://api.chub.ai/extension/${{ env.STAGE_ID }}/upload)
+          echo "Upload response (HTTP ${HTTP_STATUS}):"
+          cat upload_response.json
+          echo
+          if [ "${HTTP_STATUS}" -lt 200 ] || [ "${HTTP_STATUS}" -ge 300 ]; then
+            echo "Upload failed with HTTP status ${HTTP_STATUS}."
+            exit 1
+          fi
+          if ! jq empty upload_response.json 2>/dev/null; then
+            echo "Upload endpoint did not return valid JSON (likely an error page - e.g. chub.ai rejecting the request based on the runner's region). Failing the deploy so this isn't silently swallowed."
+            exit 1
+          fi
 
       - name: Setup .npmrc
         env:
