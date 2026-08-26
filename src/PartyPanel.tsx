@@ -1,6 +1,7 @@
-import {ReactElement, useState} from "react";
+import {ReactElement, useEffect, useState} from "react";
 import type {Stage} from "./Stage";
 import {speciesNames, getSpecies, speciesImageUrl} from "./Lore";
+import {anchorFor, onAnchorsLoaded} from "./Portrait";
 import {PartyMember, PartyMemberDetails, DEFAULT_DETAILS, detailsOf} from "./Party";
 import {itemCategories} from "./Inventory";
 
@@ -14,23 +15,59 @@ function clampLevel(value: string): number {
 export function PartyPanel({stage}: {stage: Stage}): ReactElement {
     const [, setTick] = useState(0);
     const refresh = () => setTick(tick => tick + 1);
+    // Which portrait is open full-size, if any. Held here rather than per row
+    // so the viewer can cover the whole panel.
+    const [viewing, setViewing] = useState<string | null>(null);
+
+    // The anchors file arrives after first paint; re-render when it lands so
+    // portraits settle into their configured crop.
+    useEffect(() => onAnchorsLoaded(refresh), []);
 
     const users = Object.values(stage.users).filter(user => !user.isRemoved);
 
     return (
         <div className="crunchatize-party-panel">
             {users.map(user => (
-                <PartyBlock key={user.anonymizedId} stage={stage} anonymizedId={user.anonymizedId} name={user.name} refresh={refresh} />
+                <PartyBlock
+                    key={user.anonymizedId}
+                    stage={stage}
+                    anonymizedId={user.anonymizedId}
+                    name={user.name}
+                    refresh={refresh}
+                    onViewPortrait={setViewing}
+                />
             ))}
+            {viewing && <PortraitViewer species={viewing} onClose={() => setViewing(null)} />}
         </div>
     );
 }
 
-function PartyBlock({stage, anonymizedId, name, refresh}: {
+// Full, uncropped portrait over the panel. Dismissed by clicking anywhere or
+// pressing Escape.
+function PortraitViewer({species, onClose}: {species: string; onClose: () => void}): ReactElement {
+    useEffect(() => {
+        const onKey = (event: KeyboardEvent) => {
+            if (event.key === 'Escape') onClose();
+        };
+        window.addEventListener('keydown', onKey);
+        return () => window.removeEventListener('keydown', onKey);
+    }, [onClose]);
+
+    return (
+        <div className="crunchatize-portrait-viewer" role="dialog" aria-label={`${species} portrait`} onClick={onClose}>
+            <img className="crunchatize-portrait-full" src={speciesImageUrl(species)} alt={species} />
+            <div className="crunchatize-portrait-caption">{species}</div>
+            <button type="button" className="crunchatize-portrait-close" aria-label="Close portrait" onClick={onClose}>×</button>
+        </div>
+    );
+}
+
+function PartyBlock({stage, anonymizedId, name, refresh, onViewPortrait}: {
     stage: Stage;
     anonymizedId: string;
     name: string;
     refresh: () => void;
+    onViewPortrait: (species: string) => void;
 }): ReactElement {
     const [expandedSpecies, setExpandedSpecies] = useState<string | null>(null);
     const [sending, setSending] = useState(false);
@@ -59,6 +96,7 @@ function PartyBlock({stage, anonymizedId, name, refresh}: {
                     <PartyMemberRow
                         key={member.species}
                         member={member}
+                        onViewPortrait={onViewPortrait}
                         expanded={expandedSpecies === member.species}
                         onToggle={() => setExpandedSpecies(expandedSpecies === member.species ? null : member.species)}
                         onRemove={async () => {
@@ -273,12 +311,13 @@ function ComposeBox({disabled, onSend}: {
     );
 }
 
-function PartyMemberRow({member, expanded, onToggle, onRemove, onSaveDetails}: {
+function PartyMemberRow({member, expanded, onToggle, onRemove, onSaveDetails, onViewPortrait}: {
     member: PartyMember;
     expanded: boolean;
     onToggle: () => void;
     onRemove: () => void;
     onSaveDetails: (details: PartyMemberDetails) => void;
+    onViewPortrait: (species: string) => void;
 }): ReactElement {
     const info = getSpecies(member.species);
     const details = detailsOf(member);
@@ -301,10 +340,21 @@ function PartyMemberRow({member, expanded, onToggle, onRemove, onSaveDetails}: {
             >
                 {imageOk ? (
                     <img
-                        className="crunchatize-party-image"
+                        className="crunchatize-party-image crunchatize-party-image--clickable"
                         src={speciesImageUrl(member.species)}
                         alt=""
+                        title={`View ${member.species}'s portrait`}
+                        // Only the overflowing axis honours object-position
+                        // under object-fit: cover, so this one value anchors
+                        // the crop to the top of a portrait image and to the
+                        // left of a landscape one.
+                        style={{objectPosition: `${anchorFor(member.species) * 100}% ${anchorFor(member.species) * 100}%`}}
                         onError={() => setImageOk(false)}
+                        onClick={(event) => {
+                            // The row itself toggles the details editor.
+                            event.stopPropagation();
+                            onViewPortrait(member.species);
+                        }}
                     />
                 ) : (
                     // Keeps the row height stable (and shows where artwork

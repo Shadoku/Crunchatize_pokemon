@@ -128,9 +128,72 @@ $type-colors: (
   width: 2.4rem;
   height: 2.4rem;
   border-radius: 0.35rem;
+  // Square crop. object-position is set inline per member (see PartyPanel):
+  // under `cover` only the overflowing axis responds to it, so one anchor
+  // value tops-anchors a portrait and left-anchors a landscape.
   object-fit: cover;
+  object-position: 0% 0%;
   flex-shrink: 0;
   background-color: $surface-sunken;
+}
+
+.crunchatize-party-image--clickable {
+  cursor: zoom-in;
+
+  &:hover {
+    outline: 2px solid $ink-dim;
+    outline-offset: 1px;
+  }
+}
+
+// Full portrait, over the whole panel.
+.crunchatize-portrait-viewer {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  padding: 1.5rem;
+  cursor: zoom-out;
+  background-color: rgba(8, 9, 13, 0.88);
+  backdrop-filter: blur(3px);
+}
+
+.crunchatize-portrait-full {
+  max-width: 100%;
+  max-height: calc(100% - 2.5rem);
+  // Uncropped here - the square crop is only for the roster thumbnail.
+  object-fit: contain;
+  border-radius: 0.4rem;
+}
+
+.crunchatize-portrait-caption {
+  font-size: 0.9rem;
+  font-weight: 650;
+  color: $ink;
+}
+
+.crunchatize-portrait-close {
+  position: absolute;
+  top: 0.6rem;
+  right: 0.7rem;
+  cursor: pointer;
+  font: inherit;
+  font-size: 1.2rem;
+  line-height: 1;
+  color: $ink-dim;
+  background-color: $surface-raised;
+  border: 1px solid $line;
+  border-radius: 0.3rem;
+  padding: 0.15rem 0.5rem;
+
+  &:hover {
+    color: #fff;
+    border-color: $ink-dim;
+  }
 }
 
 .crunchatize-party-image--empty {

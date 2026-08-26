@@ -1,0 +1,5 @@
+{
+  "_comment": "Optional per-portrait crop anchors. Thumbnails are cropped to a square; this shifts that square along whichever axis overflows - down on a portrait image, right on a landscape one. 0 = top/left (the default, where faces usually are), 0.5 = centred, 1 = bottom/right. Keys are species names in any form ('Mr. Mime', 'mr. mime' and 'mrmime' all work). The special key 'default' changes the fallback for every portrait without its own entry. Delete any entry to go back to the default; the whole file is optional.",
+
+  "_example_charizard": 0.15
+}

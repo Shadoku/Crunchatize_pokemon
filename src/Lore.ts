@@ -55,8 +55,9 @@ export function getSpecies(name: string): SpeciesInfo | undefined {
 }
 
 // Turns a species name into the filename (minus extension) the party panel
-// looks for in public/moemon/, e.g. "Nidoran♀" -> "nidoranf".
-function slugifySpecies(name: string): string {
+// looks for in public/moemon/, e.g. "Nidoran♀" -> "nidoranf". Also used to
+// normalise the keys in that folder's anchors.json.
+export function slugifySpecies(name: string): string {
     return name
         .toLowerCase()
         .replace(/♀/g, 'f')
