@@ -74,9 +74,12 @@ if ($metaContent -match "(?m)^extension_id:\s*['""]([^'""]+)['""]") {
     $projectName = Split-Path -Leaf $root
     $creationJson = Join-Path $root 'creation.json'
     $body = (@{ name = $projectName } | ConvertTo-Json -Compress)
+    # Note: /api/extensions (not the bare /extensions the official template still
+    # uses) - seen working in at least one other stage repo's deploy fix. Unverified
+    # against chub.ai's own docs; revert to /extensions if this 404s for you.
     $status = & curl.exe -s -o $creationJson -w "%{http_code}" `
         -H "CH-API-KEY: $Token" -H "Content-Type: application/json" `
-        --request POST --data $body https://api.chub.ai/extensions
+        --request POST --data $body https://api.chub.ai/api/extensions
 
     $created = $null
     try { $created = Get-Content $creationJson -Raw | ConvertFrom-Json } catch { $created = $null }

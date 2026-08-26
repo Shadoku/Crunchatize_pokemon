@@ -42,7 +42,7 @@ jobs:
           if grep -q "^github_path:" public/chub_meta.yaml; then
             echo "Repo path already in metadata file."
           else
-            if ["${{ github.repository }}" == "CharHubAI/stage-template"]; then
+            if [ "${{ github.repository }}" == "CharHubAI/stage-template" ]; then
               echo "Not saving repo name for template project"
             else
               echo "Writing github path 'https://github.com/${{ github.repository }}' to metadata file."
@@ -58,15 +58,23 @@ jobs:
              echo "Secret STAGE_ID does not exist; attempting to read from file"
              STAGE_ID=$(grep '^extension_id:' public/chub_meta.yaml | cut -d ':' -f2 | tr -d " '\"")
              if [ "${STAGE_ID}" == ""  ]; then
-                if ["${{ github.repository }}" == "CharHubAI/stage-template"]; then
+                if [ "${{ github.repository }}" == "CharHubAI/stage-template" ]; then
                   echo "Not making ext id for template project"
                   STAGE_ID="extension-template-5523da8cf7de"
                 else
                   echo "Extension ID not present in public/chub_meta.yaml extension_id field either. Creating new project."
-                  sudo apt-get install jq
+                  sudo apt-get update
+                  sudo apt-get install -y jq
                   STAGE_ID=""
-                  curl -H "CH-API-KEY: ${{ secrets.CHUB_AUTH_TOKEN }}" -H "Content-Type: application/json" --request POST --data '{"name":"${{ github.event.repository.name }}"}'  https://api.chub.ai/extensions  -o creation.json
-                  STAGE_ID=$(jq -r '.id_v2' creation.json)
+                  HTTP_STATUS=$(curl -s -o creation.json -w "%{http_code}" -H "CH-API-KEY: ${{ secrets.CHUB_AUTH_TOKEN }}" -H "Content-Type: application/json" --request POST --data '{"name":"${{ github.event.repository.name }}"}' https://api.chub.ai/api/extensions)
+                  echo "Stage creation response (HTTP ${HTTP_STATUS}):"
+                  cat creation.json
+                  echo
+                  if [ "${HTTP_STATUS}" -lt 200 ] || [ "${HTTP_STATUS}" -ge 300 ]; then
+                    echo "Stage creation request failed with HTTP status ${HTTP_STATUS}."
+                    exit 1
+                  fi
+                  STAGE_ID=$(jq -r '.id_v2 // empty' creation.json)
                   if [ "${STAGE_ID}" == "" ] || [ "${STAGE_ID}" == "null" ]; then
                     echo "Extension ID creation failed; is your CHUB_AUTH_TOKEN secret set for this project?"
                     exit 1
@@ -88,21 +96,25 @@ jobs:
       - name: Char UUIDGen
         if: ${{ !contains(github.repository, 'template') }}
         run: |
-          sudo apt-get install uuid-runtime
-          for file in public/characters/*.yaml; do
-            if grep -q 'project_uuid:' "$file"; then
-              echo "project has uuid."
-            else
-              uuid=$(uuidgen)
-              echo -e "\nproject_uuid: $uuid\n" >> "$file"
-              echo "Added project_uuid to $file"
-              git config --local user.email "action@github.com"
-              git config --local user.name "GitHub Action"
-              git add $file
-              git commit -m "Add project_uuid to YAML file"
-              git push
-            fi
-          done
+          sudo apt-get update
+          sudo apt-get install -y uuid-runtime
+          if [ -d "public/characters" ]; then
+            for file in public/characters/*.yaml; do
+              [ -e "$file" ] || continue
+              if grep -q 'project_uuid:' "$file"; then
+                echo "project has uuid."
+              else
+                uuid=$(uuidgen)
+                echo -e "\nproject_uuid: $uuid\n" >> "$file"
+                echo "Added project_uuid to $file"
+                git config --local user.email "action@github.com"
+                git config --local user.name "GitHub Action"
+                git add "$file"
+                git commit -m "Add project_uuid to YAML file" || true
+                git push
+              fi
+            done
+          fi
       - name: Install dependencies
         run: yarn install
 
