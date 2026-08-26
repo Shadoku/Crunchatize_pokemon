@@ -1,6 +1,7 @@
 import type {Plugin, ViteDevServer} from 'vite';
 import {promises as fs} from 'fs';
 import path from 'path';
+import {slugifySpecies} from '../src/slug';
 
 // Portrait masters live in public/moemon/ at whatever size they were drawn -
 // often a megabyte or more each. Shipping those inside the stage bundle would
@@ -53,8 +54,13 @@ async function encode(sharp: Sharp, sourcePath: string): Promise<Buffer> {
         .toBuffer();
 }
 
-function baseName(file: string): string {
-    return file.replace(SOURCE_PATTERN, '');
+// The name the panel will actually request this portrait under. Run through
+// the app's own slug rule rather than used verbatim, so a master saved as
+// "Exeggcute.png" or "Mr. Mime.png" still lands on the URL the panel asks
+// for - otherwise it emits a file nothing ever requests, and the portrait
+// silently falls back to the placeholder on case-sensitive hosting.
+function slugOf(file: string): string {
+    return slugifySpecies(file.replace(SOURCE_PATTERN, ''));
 }
 
 export function portraitsPlugin(): Plugin {
@@ -74,7 +80,7 @@ export function portraitsPlugin(): Plugin {
                 const sources = await listSources();
                 // The requested .webp may not exist on disk; find whichever
                 // master shares its name.
-                const source = sources.find(name => baseName(name) === slug);
+                const source = sources.find(name => slugOf(name) === slug);
                 if (!source) return next();
 
                 const sourcePath = path.join(SOURCE_DIR, source);
@@ -117,7 +123,7 @@ export function portraitsPlugin(): Plugin {
             let outputBytes = 0;
             for (const source of sources) {
                 const body = await encode(sharp, path.join(SOURCE_DIR, source));
-                await fs.writeFile(path.join(DIST_DIR, `${baseName(source)}.webp`), body);
+                await fs.writeFile(path.join(DIST_DIR, `${slugOf(source)}.webp`), body);
                 sourceBytes += (await fs.stat(path.join(SOURCE_DIR, source))).size;
                 outputBytes += body.length;
             }

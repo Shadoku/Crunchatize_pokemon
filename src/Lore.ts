@@ -1,5 +1,6 @@
 import loreData from "./assets/moemonLore.json";
 import {MoemonType} from "./MoemonType";
+import {slugifySpecies} from "./slug";
 
 export interface SpeciesInfo {
     name: string;
@@ -54,16 +55,8 @@ export function getSpecies(name: string): SpeciesInfo | undefined {
     return speciesIndex.get(name.toLowerCase());
 }
 
-// Turns a species name into the filename (minus extension) the party panel
-// looks for in public/moemon/, e.g. "Nidoran♀" -> "nidoranf". Also used to
-// normalise the keys in that folder's anchors.json.
-export function slugifySpecies(name: string): string {
-    return name
-        .toLowerCase()
-        .replace(/♀/g, 'f')
-        .replace(/♂/g, 'm')
-        .replace(/[^a-z0-9]/g, '');
-}
+// Re-exported so existing callers can keep importing it from here.
+export {slugifySpecies};
 
 // Portraits are always requested as WebP. The build re-encodes the masters in
 // public/moemon/ to that, and the dev server converts them on the fly, so the
