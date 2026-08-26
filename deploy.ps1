@@ -74,12 +74,15 @@ if ($metaContent -match "(?m)^extension_id:\s*['""]([^'""]+)['""]") {
     $projectName = Split-Path -Leaf $root
     $creationJson = Join-Path $root 'creation.json'
     $body = (@{ name = $projectName } | ConvertTo-Json -Compress)
-    # Note: /api/extensions (not the bare /extensions the official template still
-    # uses) - seen working in at least one other stage repo's deploy fix. Unverified
-    # against chub.ai's own docs; revert to /extensions if this 404s for you.
+    # Also routed through the relay, same as the upload step below. The relay's
+    # only confirmed route is /{id}/ (proxying to /extension/{id}/upload), so
+    # hitting it at the bare root for "create a new extension" (no id yet,
+    # mirroring POST /extensions) is an unverified guess at a symmetric route -
+    # if this 404s, the relay likely doesn't proxy creation and this needs to
+    # go directly to https://api.chub.ai/extensions (or /api/extensions) instead.
     $status = & curl.exe -s -o $creationJson -w "%{http_code}" `
         -H "CH-API-KEY: $Token" -H "Content-Type: application/json" `
-        --request POST --data $body https://api.chub.ai/api/extensions
+        --request POST --data $body https://chub-relay.jake-h.workers.dev/
 
     $created = $null
     try { $created = Get-Content $creationJson -Raw | ConvertFrom-Json } catch { $created = $null }
