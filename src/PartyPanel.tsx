@@ -33,15 +33,11 @@ function PartyBlock({stage, anonymizedId, name, refresh}: {
     const party = stage.getFullParty(anonymizedId);
     const partySpecies = new Set(party.map(member => member.species.toLowerCase()));
 
-    async function send(dialogue: boolean, text: string) {
+    async function send(text: string) {
         if (!text || sending) return;
         setSending(true);
         try {
-            if (dialogue) {
-                await stage.sendPartyDialogue(anonymizedId, text);
-            } else {
-                await stage.sendPartyAction(anonymizedId, text);
-            }
+            await stage.sendPartyDialogue(anonymizedId, text);
         } finally {
             setSending(false);
             refresh();
@@ -88,33 +84,15 @@ function PartyBlock({stage, anonymizedId, name, refresh}: {
                     .filter(name => !partySpecies.has(name.toLowerCase()))
                     .map(name => <option key={name} value={name}>{name}</option>)}
             </select>
-            <ComposeBox
-                variant="say"
-                label="Say"
-                hint="no dice"
-                placeholder="Speak or narrate freely..."
-                disabled={sending}
-                onSend={(text) => send(true, text)}
-            />
-            <ComposeBox
-                variant="do"
-                label="Do"
-                hint="rolls 2d6"
-                placeholder="Attempt something risky..."
-                disabled={sending}
-                onSend={(text) => send(false, text)}
-            />
+            <ComposeBox disabled={sending} onSend={send} />
         </div>
     );
 }
 
-// One labelled compose surface. Kept separate per kind (rather than one field
-// with two buttons) so it's unambiguous which sort of input is being written.
-function ComposeBox({variant, label, hint, placeholder, disabled, onSend}: {
-    variant: 'say' | 'do';
-    label: string;
-    hint: string;
-    placeholder: string;
+// The freeform box: anything that shouldn't be put to the dice - dialogue,
+// narration, scene-setting, OOC asides. Ordinary actions go through Chub's
+// own input box below the chat, which rolls as normal.
+function ComposeBox({disabled, onSend}: {
     disabled: boolean;
     onSend: (text: string) => void | Promise<void>;
 }): ReactElement {
@@ -128,15 +106,15 @@ function ComposeBox({variant, label, hint, placeholder, disabled, onSend}: {
     }
 
     return (
-        <div className={`crunchatize-compose crunchatize-compose--${variant}`}>
+        <div className="crunchatize-compose">
             <div className="crunchatize-compose-header">
-                <span className="crunchatize-compose-label">{label}</span>
-                <span className="crunchatize-compose-hint">{hint}</span>
+                <span className="crunchatize-compose-label">Freeform</span>
+                <span className="crunchatize-compose-hint">no roll</span>
             </div>
             <textarea
                 className="crunchatize-compose-input"
                 rows={2}
-                placeholder={placeholder}
+                placeholder="Dialogue, narration, anything not put to the dice..."
                 value={text}
                 disabled={disabled}
                 onChange={(event) => setText(event.target.value)}
@@ -153,7 +131,7 @@ function ComposeBox({variant, label, hint, placeholder, disabled, onSend}: {
                 className="crunchatize-compose-send"
                 disabled={disabled || !trimmed}
                 onClick={submit}
-            >{label}</button>
+            >Send</button>
         </div>
     );
 }

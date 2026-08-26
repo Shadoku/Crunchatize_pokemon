@@ -8,11 +8,11 @@ import {getSpecies, findSpeciesMentions} from "./Lore";
 import {PartyMember, PartyMemberDetails, DEFAULT_DETAILS, detailsOf, typesOf} from "./Party";
 import {PartyPanel} from "./PartyPanel";
 
-// Prefix used to mark a message sent via the panel's "Send Dialogue" button
-// so beforePrompt skips classification/rolling entirely. Always stripped
-// before the message is displayed, and since the panel replaces Chub's own
-// input box (see load()), every user message the stage ever sees originates
-// from one of our two send buttons - no risk of colliding with organic text.
+// Prefix used to mark a message sent via the panel's freeform box so
+// beforePrompt skips classification/rolling entirely; always stripped before
+// the message is displayed. Chub's native input box handles ordinary (rolled)
+// actions, so anything typed there takes the normal path. A player who typed
+// this marker verbatim would skip their own roll, which is harmless.
 const NO_ROLL_MARKER = '[[NOROLL]]';
 
 type MessageStateType = any;
@@ -187,22 +187,18 @@ export class Stage extends StageBase<InitStateType, ChatStateType, MessageStateT
         await this.messenger.updateChatState(this.chatState);
     }
 
-    // Sends the player's text as a normal action, subject to the usual
-    // classify-and-roll pipeline in beforePrompt.
-    async sendPartyAction(anonymizedId: string, text: string): Promise<void> {
-        await this.messenger.impersonate({speaker_id: anonymizedId, message: text, parent_id: null, is_main: true});
-    }
-
     // Sends the player's text as plain dialogue/narration that's guaranteed
     // not to trigger a roll - see the NO_ROLL_MARKER handling in beforePrompt.
+    // Rolled actions go through Chub's native input instead.
     async sendPartyDialogue(anonymizedId: string, text: string): Promise<void> {
         await this.messenger.impersonate({speaker_id: anonymizedId, message: NO_ROLL_MARKER + text, parent_id: null, is_main: true});
     }
 
     async load(): Promise<Partial<LoadResponse<InitStateType, ChatStateType, MessageStateType>>> {
-        // The party panel's own action bar (see PartyPanel) replaces free
-        // typing entirely, so Chub's native chat input is hidden.
-        await this.messenger.updateEnvironment({input_enabled: false});
+        // Chub's native input is the box for ordinary, rolled actions. Set
+        // explicitly rather than relying on the default, so a chat left over
+        // from a build that hid the input gets it back.
+        await this.messenger.updateEnvironment({input_enabled: true});
 
         return {
             success: true,
