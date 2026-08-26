@@ -402,7 +402,13 @@ function PartyMemberRow({member, expanded, onToggle, onRemove, onSaveDetails, on
                             <img
                                 src={speciesImageUrl(member.species)}
                                 alt=""
-                                //style={{objectPosition: `${anchorFor(member.species) * 100}% ${anchorFor(member.species) * 100}%`}}
+                                // Centred horizontally, unlike the square
+                                // thumbnail. This box is tall and narrow, so
+                                // it's the horizontal axis that overflows -
+                                // the anchor would pin the art to the left
+                                // and clip the right. The anchor still
+                                // applies vertically, for the rare image tall
+                                // enough to overflow that way instead.
                                 style={{objectPosition: `50% ${anchorFor(member.species) * 100}%`}}
                             />
                         </button>

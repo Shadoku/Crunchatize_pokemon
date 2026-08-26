@@ -90,6 +90,10 @@ export class Stage extends StageBase<InitStateType, ChatStateType, MessageStateT
     // unrelated action.
     noRollContent: string|null = null;
 
+    // The bot Chub last prompted for, or that last spoke. Used as the target
+    // when the panel asks for a reply - see respondingCharacterId.
+    lastRespondingId: string|null = null;
+
 
     constructor(data: InitialData<InitStateType, ChatStateType, MessageStateType, ConfigType>) {
         super(data);
@@ -252,13 +256,40 @@ export class Stage extends StageBase<InitStateType, ChatStateType, MessageStateT
     // without the nudge the message just sits there and the chat stalls.
     async speakAsPlayer(anonymizedId: string, text: string): Promise<void> {
         await this.messenger.impersonate({speaker_id: anonymizedId, message: text, parent_id: null, is_main: true});
-        await this.messenger.nudge({speaker_id: this.respondingCharacterId(), parent_id: null, is_main: true});
+
+        // speaker_id is omitted rather than sent as undefined when there's no
+        // known bot: Chub looks the id up to build the prompt, and a lookup
+        // on undefined fails inside its generation code rather than falling
+        // back to a sensible default.
+        const request: {parent_id: null; is_main: boolean; speaker_id?: string} = {parent_id: null, is_main: true};
+        const speaker = this.respondingCharacterId();
+        if (speaker) request.speaker_id = speaker;
+        await this.messenger.nudge(request);
     }
 
-    // Whichever character should answer something the panel injected. In a
-    // one-character chat this is simply that character.
+    // Whichever bot should answer something the panel injected. Prefers one
+    // Chub itself has named - the character it last asked us to prompt for,
+    // or the one that last spoke - since those are certain to be resolvable.
+    // Only then falls back to the roster, keyed by anonymized ID (the dict
+    // key is authoritative; the object's own field may not be populated).
     respondingCharacterId(): string|undefined {
-        return Object.values(this.characters).find(character => !character.isRemoved)?.anonymizedId;
+        if (this.lastRespondingId && this.isActiveCharacter(this.lastRespondingId)) {
+            return this.lastRespondingId;
+        }
+        return Object.entries(this.characters)
+            .find(([id, character]) => id && !character.isRemoved)?.[0];
+    }
+
+    isActiveCharacter(anonymizedId: string): boolean {
+        const character = this.characters[anonymizedId];
+        return !!character && !character.isRemoved;
+    }
+
+    // Remembers a bot Chub has vouched for by using it itself.
+    rememberResponder(anonymizedId: string|null|undefined) {
+        if (anonymizedId && this.isActiveCharacter(anonymizedId)) {
+            this.lastRespondingId = anonymizedId;
+        }
     }
 
     // Sends the player's text as plain dialogue/narration that's guaranteed
@@ -293,6 +324,10 @@ export class Stage extends StageBase<InitStateType, ChatStateType, MessageStateT
             content,
             promptForId
         } = userMessage;
+
+        // Chub told us who this prompt is for, so that bot is a known-good
+        // target if the panel later needs to ask for a reply itself.
+        this.rememberResponder(promptForId);
 
         const errorMessage: string|null = null;
         let takenAction: Action|null = null;
@@ -379,6 +414,9 @@ export class Stage extends StageBase<InitStateType, ChatStateType, MessageStateT
     }
 
     async afterResponse(botMessage: Message): Promise<Partial<StageResponse<ChatStateType, MessageStateType>>> {
+
+        // The bot that just spoke is definitely a valid speaker in this chat.
+        this.rememberResponder(botMessage.anonymizedId);
 
         const message = botMessage.content;
 
