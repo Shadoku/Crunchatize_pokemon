@@ -66,13 +66,14 @@ jobs:
                   sudo apt-get update
                   sudo apt-get install -y jq
                   STAGE_ID=""
-                  # Also routed through the relay, same as the upload step. The relay's
-                  # only confirmed route is /{id}/ (proxying to /extension/{id}/upload),
-                  # so hitting it at the bare root for "create a new extension" (which has
-                  # no id yet, mirroring POST /extensions) is an unverified guess at a
-                  # symmetric route - if this 404s, the relay likely doesn't proxy
-                  # creation at all and this call needs to go directly to chub.ai instead.
-                  HTTP_STATUS=$(curl -s -o creation.json -w "%{http_code}" -H "CH-API-KEY: ${{ secrets.CHUB_AUTH_TOKEN }}" -H "Content-Type: application/json" --request POST --data '{"name":"${{ github.event.repository.name }}"}' https://chub-relay.jake-h.workers.dev/)
+                  # Confirmed NOT relay-able: chub-relay.jake-h.workers.dev returned
+                  # "Missing stage ID in path. This endpoint is intended as a relay for
+                  # Chub stage deployment." - it only proxies uploads to an existing
+                  # extension (/{id}/), not creation of a new one. So this still has to
+                  # go straight to chub.ai, which is still blocked from CI/VPN; a valid
+                  # extension_id needs to come from somewhere else (e.g. chub.ai's own
+                  # website) until that's resolved.
+                  HTTP_STATUS=$(curl -s -o creation.json -w "%{http_code}" -H "CH-API-KEY: ${{ secrets.CHUB_AUTH_TOKEN }}" -H "Content-Type: application/json" --request POST --data '{"name":"${{ github.event.repository.name }}"}' https://api.chub.ai/extensions)
                   echo "Stage creation response (HTTP ${HTTP_STATUS}):"
                   cat creation.json
                   echo

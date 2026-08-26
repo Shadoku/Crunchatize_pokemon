@@ -74,15 +74,16 @@ if ($metaContent -match "(?m)^extension_id:\s*['""]([^'""]+)['""]") {
     $projectName = Split-Path -Leaf $root
     $creationJson = Join-Path $root 'creation.json'
     $body = (@{ name = $projectName } | ConvertTo-Json -Compress)
-    # Also routed through the relay, same as the upload step below. The relay's
-    # only confirmed route is /{id}/ (proxying to /extension/{id}/upload), so
-    # hitting it at the bare root for "create a new extension" (no id yet,
-    # mirroring POST /extensions) is an unverified guess at a symmetric route -
-    # if this 404s, the relay likely doesn't proxy creation and this needs to
-    # go directly to https://api.chub.ai/extensions (or /api/extensions) instead.
+    # Confirmed NOT relay-able: chub-relay.jake-h.workers.dev returned "Missing
+    # stage ID in path. This endpoint is intended as a relay for Chub stage
+    # deployment." - it only proxies uploads to an existing extension (/{id}/),
+    # not creation of a new one. So this still has to go straight to chub.ai,
+    # which may still be blocked depending on your network; a valid
+    # extension_id may need to come from somewhere else (e.g. chub.ai's own
+    # website) if this keeps failing.
     $status = & curl.exe -s -o $creationJson -w "%{http_code}" `
         -H "CH-API-KEY: $Token" -H "Content-Type: application/json" `
-        --request POST --data $body https://chub-relay.jake-h.workers.dev/
+        --request POST --data $body https://api.chub.ai/extensions
 
     $created = $null
     try { $created = Get-Content $creationJson -Raw | ConvertFrom-Json } catch { $created = $null }
