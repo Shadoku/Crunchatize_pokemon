@@ -1,8 +1,12 @@
 # Party panel artwork
 
-Drop a `.png` per species in this folder and the party panel will pick it up
+Drop one image per species in this folder and the party panel will pick it up
 automatically. Missing artwork just leaves a blank thumbnail, so you can add
 these incrementally.
+
+These are the **masters**: keep them at full quality and whatever size they
+were drawn at. They are never shipped as-is — see [Build handling](#build-handling).
+`.png`, `.jpg` and `.webp` are all accepted.
 
 ## Naming
 
@@ -21,6 +25,22 @@ apostrophes, periods, hyphens all disappear); ♀/♂ become `f`/`m`.
 | Porygon-Z    | `porygonz.png`    |
 
 See `speciesImageUrl`/`slugifySpecies` in `src/Lore.ts` for the exact rule.
+
+## Build handling
+
+`yarn build` re-encodes every master here to **WebP with a 768px long edge**
+and writes only those into `dist/`. The masters themselves, this README and
+`.gitkeep` are all left out of the build, so the deploy zip stays small no
+matter how large the source art is — a 1.1 MB PNG comes out around 37 KB.
+
+`yarn dev` does the same conversion on the fly, so what you see locally
+matches what deploys. Nothing needs regenerating by hand and no optimised
+copies get checked in.
+
+The size and quality live at the top of `scripts/vite-plugin-portraits.ts`.
+That step needs `sharp`, which `yarn install` provides; if it is ever
+unavailable the build still succeeds and warns, shipping the full-size
+masters instead.
 
 ## Cropping
 

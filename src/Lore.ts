@@ -65,8 +65,11 @@ export function slugifySpecies(name: string): string {
         .replace(/[^a-z0-9]/g, '');
 }
 
+// Portraits are always requested as WebP. The build re-encodes the masters in
+// public/moemon/ to that, and the dev server converts them on the fly, so the
+// master on disk can be a .png/.jpg of any size.
 export function speciesImageUrl(name: string): string {
-    return `/moemon/${slugifySpecies(name)}.png`;
+    return `/moemon/${slugifySpecies(name)}.webp`;
 }
 
 // Finds every lorebook species mentioned by name in a block of free text,
