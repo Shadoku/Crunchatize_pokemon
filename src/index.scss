@@ -218,6 +218,162 @@ $type-colors: (
   }
 }
 
+.crunchatize-add-row {
+  display: flex;
+  gap: 0.4rem;
+  align-items: stretch;
+
+  .crunchatize-party-add {
+    flex: 1;
+    min-width: 0;
+  }
+}
+
+.crunchatize-add-level {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  flex-shrink: 0;
+  font-size: 0.8rem;
+  color: $ink-dim;
+  background-color: $surface-raised;
+  border: 1px solid $line;
+  border-radius: 0.4rem;
+  padding: 0 0.5rem;
+
+  input {
+    width: 3rem;
+    font: inherit;
+    font-size: 0.88rem;
+    color: $ink;
+    background: none;
+    border: none;
+    padding: 0.3rem 0;
+
+    &:focus { outline: none; }
+  }
+}
+
+// The bag.
+.crunchatize-bag {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  margin-top: 0.35rem;
+  padding-top: 0.6rem;
+  border-top: 1px solid $line;
+}
+
+.crunchatize-bag-title {
+  font-size: 0.8rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: $ink-dim;
+}
+
+.crunchatize-bag-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.crunchatize-bag-item {
+  display: flex;
+  align-items: stretch;
+  gap: 0.35rem;
+}
+
+// The item itself is the "use" button, so the whole row is the hit target.
+.crunchatize-bag-use {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font: inherit;
+  font-size: 0.9rem;
+  text-align: left;
+  cursor: pointer;
+  color: $ink;
+  background-color: $surface-raised;
+  border: 1px solid $line;
+  border-radius: 0.4rem;
+  padding: 0.35rem 0.55rem;
+
+  &:not(:disabled):hover {
+    border-color: $accent-do;
+    color: #fff;
+  }
+
+  &:disabled {
+    cursor: default;
+    opacity: 0.5;
+  }
+}
+
+.crunchatize-bag-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.crunchatize-bag-quantity {
+  margin-left: auto;
+  flex-shrink: 0;
+  font-size: 0.8rem;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: $accent-do;
+}
+
+.crunchatize-bag-add {
+  display: flex;
+  gap: 0.35rem;
+
+  input {
+    font: inherit;
+    font-size: 0.88rem;
+    color: $ink;
+    background-color: $surface-sunken;
+    border: 1px solid $line;
+    border-radius: 0.35rem;
+    padding: 0.3rem 0.45rem;
+
+    &::placeholder { color: rgba(167, 174, 194, 0.7); }
+    &:focus { outline: none; border-color: $ink-dim; }
+  }
+}
+
+.crunchatize-bag-name-input {
+  flex: 1;
+  min-width: 0;
+}
+
+.crunchatize-bag-quantity-input {
+  width: 3.5rem;
+  flex-shrink: 0;
+}
+
+.crunchatize-bag-add-button {
+  flex-shrink: 0;
+  font: inherit;
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  color: $ink;
+  background-color: $surface-raised;
+  border: 1px solid $line;
+  border-radius: 0.35rem;
+  padding: 0.3rem 0.7rem;
+
+  &:not(:disabled):hover { border-color: $ink-dim; }
+  &:disabled { cursor: default; opacity: 0.45; }
+}
+
 .crunchatize-party-editor {
   display: flex;
   flex-direction: column;

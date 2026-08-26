@@ -1,7 +1,12 @@
 import {ReactElement, useState} from "react";
 import type {Stage} from "./Stage";
 import {speciesNames, getSpecies, speciesImageUrl} from "./Lore";
-import {PartyMember, PartyMemberDetails, detailsOf} from "./Party";
+import {PartyMember, PartyMemberDetails, DEFAULT_DETAILS, detailsOf} from "./Party";
+import {itemCategories} from "./Inventory";
+
+function clampLevel(value: string): number {
+    return Math.min(Math.max(Math.floor(Number(value)) || 1, 1), 100);
+}
 
 // Renders as its own component (rather than inline in Stage.render()) so it
 // can hold its own re-render state; the Stage instance isn't itself a React
@@ -29,6 +34,7 @@ function PartyBlock({stage, anonymizedId, name, refresh}: {
 }): ReactElement {
     const [expandedSpecies, setExpandedSpecies] = useState<string | null>(null);
     const [sending, setSending] = useState(false);
+    const [addLevel, setAddLevel] = useState(DEFAULT_DETAILS.level);
 
     const party = stage.getFullParty(anonymizedId);
     const partySpecies = new Set(party.map(member => member.species.toLowerCase()));
@@ -67,24 +73,155 @@ function PartyBlock({stage, anonymizedId, name, refresh}: {
                     />
                 ))}
             </ul>
+            <div className="crunchatize-add-row">
+                <select
+                    className="crunchatize-party-add"
+                    defaultValue=""
+                    onChange={async (event) => {
+                        const species = event.target.value;
+                        event.target.value = '';
+                        if (species) {
+                            await stage.addPartyMember(anonymizedId, species, addLevel);
+                            refresh();
+                        }
+                    }}
+                >
+                    <option value="" disabled>Add a moemon...</option>
+                    {speciesNames
+                        .filter(name => !partySpecies.has(name.toLowerCase()))
+                        .map(name => <option key={name} value={name}>{name}</option>)}
+                </select>
+                <label className="crunchatize-add-level" title="Level for newly added moemon; sets their starting moves">
+                    Lv.
+                    <input
+                        type="number"
+                        min={1}
+                        max={100}
+                        value={addLevel}
+                        onChange={(event) => setAddLevel(clampLevel(event.target.value))}
+                    />
+                </label>
+            </div>
+            <InventoryPanel stage={stage} anonymizedId={anonymizedId} refresh={refresh} />
+            <ComposeBox disabled={sending} onSend={send} />
+        </div>
+    );
+}
+
+// The player's bag. Items can be picked from the preset list or typed in by
+// hand; clicking one spends it and announces its use in the chat.
+function InventoryPanel({stage, anonymizedId, refresh}: {
+    stage: Stage;
+    anonymizedId: string;
+    refresh: () => void;
+}): ReactElement {
+    const [name, setName] = useState('');
+    const [quantity, setQuantity] = useState(1);
+    const [busy, setBusy] = useState(false);
+
+    const inventory = stage.getInventory(anonymizedId);
+
+    async function add() {
+        if (!name.trim() || busy) return;
+        setBusy(true);
+        try {
+            await stage.addInventoryItem(anonymizedId, name, quantity);
+            setName('');
+            setQuantity(1);
+        } finally {
+            setBusy(false);
+            refresh();
+        }
+    }
+
+    async function use(itemName: string) {
+        if (busy) return;
+        setBusy(true);
+        try {
+            await stage.useInventoryItem(anonymizedId, itemName);
+        } finally {
+            setBusy(false);
+            refresh();
+        }
+    }
+
+    return (
+        <div className="crunchatize-bag">
+            <div className="crunchatize-bag-title">Bag</div>
+            {inventory.length === 0 && <div className="crunchatize-party-empty">Empty.</div>}
+            <ul className="crunchatize-bag-list">
+                {inventory.map(item => (
+                    <li key={item.name} className="crunchatize-bag-item">
+                        <button
+                            type="button"
+                            className="crunchatize-bag-use"
+                            disabled={busy}
+                            title={`Use one ${item.name}`}
+                            onClick={() => use(item.name)}
+                        >
+                            <span className="crunchatize-bag-name">{item.name}</span>
+                            <span className="crunchatize-bag-quantity">×{item.quantity}</span>
+                        </button>
+                        <button
+                            type="button"
+                            className="crunchatize-party-remove"
+                            aria-label={`Remove ${item.name}`}
+                            disabled={busy}
+                            onClick={async () => {
+                                await stage.removeInventoryItem(anonymizedId, item.name);
+                                refresh();
+                            }}
+                        >×</button>
+                    </li>
+                ))}
+            </ul>
             <select
                 className="crunchatize-party-add"
-                defaultValue=""
-                onChange={async (event) => {
-                    const species = event.target.value;
-                    event.target.value = '';
-                    if (species) {
-                        await stage.addPartyMember(anonymizedId, species);
-                        refresh();
-                    }
-                }}
+                value=""
+                // Picking a preset fills the name field rather than adding
+                // outright, so quantity can be set before committing - and so
+                // a preset can be tweaked into a custom name.
+                onChange={(event) => setName(event.target.value)}
             >
-                <option value="" disabled>Add a moemon...</option>
-                {speciesNames
-                    .filter(name => !partySpecies.has(name.toLowerCase()))
-                    .map(name => <option key={name} value={name}>{name}</option>)}
+                <option value="" disabled>Choose an item...</option>
+                {itemCategories.map(category => (
+                    <optgroup key={category.name} label={category.name}>
+                        {category.items.map(item => <option key={item} value={item}>{item}</option>)}
+                    </optgroup>
+                ))}
             </select>
-            <ComposeBox disabled={sending} onSend={send} />
+            <div className="crunchatize-bag-add">
+                <input
+                    className="crunchatize-bag-name-input"
+                    type="text"
+                    placeholder="or type an item name..."
+                    value={name}
+                    disabled={busy}
+                    onChange={(event) => setName(event.target.value)}
+                    onKeyDown={(event) => {
+                        if (event.key === 'Enter') {
+                            event.preventDefault();
+                            add();
+                        }
+                    }}
+                />
+                <input
+                    className="crunchatize-bag-quantity-input"
+                    type="number"
+                    min={1}
+                    max={999}
+                    aria-label="Quantity"
+                    value={quantity}
+                    disabled={busy}
+                    onChange={(event) => setQuantity(Math.min(Math.max(Math.floor(Number(event.target.value)) || 1, 1), 999))}
+                />
+                <button
+                    type="button"
+                    className="crunchatize-bag-add-button"
+                    disabled={busy || !name.trim()}
+                    onClick={add}
+                >Add</button>
+            </div>
         </div>
     );
 }

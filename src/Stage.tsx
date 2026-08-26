@@ -5,8 +5,9 @@ import {Action} from "./Action";
 import {Outcome, Result, ResultDescription} from "./Outcome";
 import {MoemonType, TypeDomainDescription, bestEffectiveness, modifierForMultiplier} from "./MoemonType";
 import {getSpecies, findSpeciesMentions} from "./Lore";
-import {PartyMember, PartyMemberDetails, detailsOf, typesOf} from "./Party";
+import {PartyMember, PartyMemberDetails, DEFAULT_DETAILS, detailsOf, typesOf} from "./Party";
 import {defaultDetailsFor} from "./Moveset";
+import {InventoryItem, parseInventory, sameItem} from "./Inventory";
 import {PartyPanel} from "./PartyPanel";
 
 // Prefix used to mark a message sent via the panel's freeform box so
@@ -39,10 +40,13 @@ interface UserState {
     lastOutcomePrompt: string;
 }
 
-// Chat-wide (not tied to a branch) record of party members the player has
-// explicitly added or removed by hand via the party panel.
+// Chat-wide (not tied to a branch) record of what the player has set up by
+// hand in the panel: their explicit party edits, and their bag. Both are
+// edited outside the normal lifecycle hooks, so they're persisted straight
+// through the messenger rather than returned from beforePrompt.
 interface ChatPartyState {
     manualParty: PartyMember[];
+    inventory: InventoryItem[];
 }
 
 const DOMAIN_HYPOTHESIS = 'The narrator\'s action principally draws upon {}.';
@@ -153,25 +157,30 @@ export class Stage extends StageBase<InitStateType, ChatStateType, MessageStateT
         }
     }
 
-    // Adds a moemon to the player's roster by hand; persisted immediately via
-    // the messenger, since this happens outside the normal lifecycle hooks.
-    async addPartyMember(anonymizedId: string, species: string): Promise<void> {
+    // Writes one slice of a player's chat state without disturbing the rest -
+    // the party and the bag live side by side, so a wholesale replace here
+    // would silently drop whichever one wasn't being edited.
+    async patchChatState(anonymizedId: string, patch: Partial<ChatPartyState>): Promise<void> {
+        const existing = this.chatState[anonymizedId] ?? {manualParty: [], inventory: []};
+        this.chatState = {...this.chatState, [anonymizedId]: {...existing, ...patch}};
+        await this.messenger.updateChatState(this.chatState);
+    }
+
+    // Adds a moemon to the player's roster by hand, at the level given (its
+    // moves and held item follow from that level).
+    async addPartyMember(anonymizedId: string, species: string, level: number = DEFAULT_DETAILS.level): Promise<void> {
         if (!getSpecies(species)) return;
         const existing = this.getManualParty(anonymizedId);
         if (existing.some(member => member.species.toLowerCase() === species.toLowerCase())) return;
-        this.chatState = {
-            ...this.chatState,
-            [anonymizedId]: {manualParty: [...existing, {species, source: 'manual', details: defaultDetailsFor(species)} as PartyMember]}
-        };
-        await this.messenger.updateChatState(this.chatState);
+        const member = {species, source: 'manual', details: defaultDetailsFor(species, level)} as PartyMember;
+        await this.patchChatState(anonymizedId, {manualParty: [...existing, member]});
     }
 
     async removePartyMember(anonymizedId: string, species: string): Promise<void> {
         const manualParty = this.getManualParty(anonymizedId).filter(member => member.species.toLowerCase() !== species.toLowerCase());
-        this.chatState = {...this.chatState, [anonymizedId]: {manualParty}};
         const userState = this.getUserState(anonymizedId);
         userState.autoParty = userState.autoParty.filter(member => member.species.toLowerCase() !== species.toLowerCase());
-        await this.messenger.updateChatState(this.chatState);
+        await this.patchChatState(anonymizedId, {manualParty});
     }
 
     // Saves edited level/moves/held item for a party member, whether it was
@@ -181,11 +190,52 @@ export class Stage extends StageBase<InitStateType, ChatStateType, MessageStateT
     async updatePartyMemberDetails(anonymizedId: string, species: string, details: PartyMemberDetails): Promise<void> {
         if (!getSpecies(species)) return;
         const withoutSpecies = this.getManualParty(anonymizedId).filter(member => member.species.toLowerCase() !== species.toLowerCase());
-        this.chatState = {
-            ...this.chatState,
-            [anonymizedId]: {manualParty: [...withoutSpecies, {species, source: 'manual', details} as PartyMember]}
-        };
-        await this.messenger.updateChatState(this.chatState);
+        const member = {species, source: 'manual', details} as PartyMember;
+        await this.patchChatState(anonymizedId, {manualParty: [...withoutSpecies, member]});
+    }
+
+    getInventory(anonymizedId: string): InventoryItem[] {
+        return parseInventory(this.chatState[anonymizedId]?.inventory);
+    }
+
+    // Adding an item the player already carries tops up the stack rather than
+    // creating a second entry.
+    async addInventoryItem(anonymizedId: string, name: string, quantity: number = 1): Promise<void> {
+        const trimmed = name.trim();
+        if (!trimmed) return;
+        const amount = Math.max(Math.floor(quantity) || 1, 1);
+        const inventory = this.getInventory(anonymizedId);
+        const existing = inventory.find(item => sameItem(item.name, trimmed));
+        const updated = existing
+            ? inventory.map(item => sameItem(item.name, trimmed) ? {...item, quantity: item.quantity + amount} : item)
+            : [...inventory, {name: trimmed, quantity: amount}];
+        await this.patchChatState(anonymizedId, {inventory: updated});
+    }
+
+    async removeInventoryItem(anonymizedId: string, name: string): Promise<void> {
+        const inventory = this.getInventory(anonymizedId).filter(item => !sameItem(item.name, name));
+        await this.patchChatState(anonymizedId, {inventory});
+    }
+
+    // Spends one of an item and announces it in the chat as an ordinary
+    // action, so whether it works is put to the dice like anything else.
+    // The stack is decremented first, and drops off the list at zero.
+    async useInventoryItem(anonymizedId: string, name: string): Promise<void> {
+        const inventory = this.getInventory(anonymizedId);
+        const existing = inventory.find(item => sameItem(item.name, name));
+        if (!existing) return;
+
+        const updated = existing.quantity > 1
+            ? inventory.map(item => sameItem(item.name, name) ? {...item, quantity: item.quantity - 1} : item)
+            : inventory.filter(item => !sameItem(item.name, name));
+        await this.patchChatState(anonymizedId, {inventory: updated});
+
+        await this.messenger.impersonate({
+            speaker_id: anonymizedId,
+            message: `I use the ${existing.name}.`,
+            parent_id: null,
+            is_main: true
+        });
     }
 
     // Sends the player's text as plain dialogue/narration that's guaranteed
@@ -325,13 +375,18 @@ export class Stage extends StageBase<InitStateType, ChatStateType, MessageStateT
     }
 
     buildPartySystemMessage(): string {
-        const lines = Object.values(this.users).map(user => {
+        const lines: string[] = [];
+        for (const user of Object.values(this.users)) {
             const party = this.getFullParty(user.anonymizedId);
-            const partyDescription = party.length > 0
+            lines.push(`${user.name}'s Party: ${party.length > 0
                 ? party.map(member => this.describePartyMember(member)).join(', ')
-                : 'No moemon yet';
-            return `${user.name}'s Party: ${partyDescription}`;
-        });
+                : 'No moemon yet'}`);
+
+            const inventory = this.getInventory(user.anonymizedId);
+            if (inventory.length > 0) {
+                lines.push(`${user.name}'s Bag: ${inventory.map(item => `${item.name} x${item.quantity}`).join(', ')}`);
+            }
+        }
         return '---\n```' + lines.join('\n') + '```';
     }
 
