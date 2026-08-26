@@ -10,13 +10,6 @@ import {defaultDetailsFor} from "./Moveset";
 import {InventoryItem, parseInventory, sameItem} from "./Inventory";
 import {PartyPanel} from "./PartyPanel";
 
-// Prefix used to mark a message sent via the panel's freeform box so
-// beforePrompt skips classification/rolling entirely; always stripped before
-// the message is displayed. Chub's native input box handles ordinary (rolled)
-// actions, so anything typed there takes the normal path. A player who typed
-// this marker verbatim would skip their own roll, which is harmless.
-const NO_ROLL_MARKER = '[[NOROLL]]';
-
 type MessageStateType = any;
 
 type ConfigType = any;
@@ -78,6 +71,15 @@ export class Stage extends StageBase<InitStateType, ChatStateType, MessageStateT
     users: {[key: string]: User} = {};
     characters: {[key: string]: Character} = {};
     globalModifier: number;
+
+    // Text the panel injected that must not be rolled on (the freeform box).
+    // Matched by content rather than a marker in the message itself: the
+    // message reaches the chat via impersonate(), which does not call
+    // beforePrompt, so a marker would never get stripped and would show up
+    // verbatim in the chat. Matching also means a flag left behind - if
+    // beforePrompt never fires - can't swallow the roll on some later,
+    // unrelated action.
+    noRollContent: string|null = null;
 
 
     constructor(data: InitialData<InitStateType, ChatStateType, MessageStateType, ConfigType>) {
@@ -229,20 +231,29 @@ export class Stage extends StageBase<InitStateType, ChatStateType, MessageStateT
             ? inventory.map(item => sameItem(item.name, name) ? {...item, quantity: item.quantity - 1} : item)
             : inventory.filter(item => !sameItem(item.name, name));
         await this.patchChatState(anonymizedId, {inventory: updated});
+        await this.speakAsPlayer(anonymizedId, `I use the ${existing.name}.`);
+    }
 
-        await this.messenger.impersonate({
-            speaker_id: anonymizedId,
-            message: `I use the ${existing.name}.`,
-            parent_id: null,
-            is_main: true
-        });
+    // Puts a message in the chat as the player, then asks a bot to reply.
+    // impersonate() only inserts the message - it never prompts anyone - so
+    // without the nudge the message just sits there and the chat stalls.
+    async speakAsPlayer(anonymizedId: string, text: string): Promise<void> {
+        await this.messenger.impersonate({speaker_id: anonymizedId, message: text, parent_id: null, is_main: true});
+        await this.messenger.nudge({speaker_id: this.respondingCharacterId(), parent_id: null, is_main: true});
+    }
+
+    // Whichever character should answer something the panel injected. In a
+    // one-character chat this is simply that character.
+    respondingCharacterId(): string|undefined {
+        return Object.values(this.characters).find(character => !character.isRemoved)?.anonymizedId;
     }
 
     // Sends the player's text as plain dialogue/narration that's guaranteed
-    // not to trigger a roll - see the NO_ROLL_MARKER handling in beforePrompt.
-    // Rolled actions go through Chub's native input instead.
+    // not to trigger a roll. Rolled actions go through Chub's native input
+    // instead, or through item use below.
     async sendPartyDialogue(anonymizedId: string, text: string): Promise<void> {
-        await this.messenger.impersonate({speaker_id: anonymizedId, message: NO_ROLL_MARKER + text, parent_id: null, is_main: true});
+        this.noRollContent = text.trim();
+        await this.speakAsPlayer(anonymizedId, text);
     }
 
     async load(): Promise<Partial<LoadResponse<InitStateType, ChatStateType, MessageStateType>>> {
@@ -274,10 +285,10 @@ export class Stage extends StageBase<InitStateType, ChatStateType, MessageStateT
         let takenAction: Action|null = null;
         let finalContent: string|undefined = content;
 
-        // Sent via the panel's "Send Dialogue" button: skip classification
-        // and rolling entirely, and just pass the (unmarked) text through.
-        if (finalContent?.startsWith(NO_ROLL_MARKER)) {
-            finalContent = finalContent.slice(NO_ROLL_MARKER.length);
+        // Sent via the panel's freeform box: skip classification and rolling
+        // entirely and pass the text straight through.
+        if (finalContent && this.noRollContent !== null && finalContent.trim() === this.noRollContent) {
+            this.noRollContent = null;
             this.addAutoPartyMembersFromText(anonymizedId, finalContent);
             this.setLastOutcome(anonymizedId, null);
 
