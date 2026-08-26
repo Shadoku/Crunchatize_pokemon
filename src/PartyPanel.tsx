@@ -402,7 +402,8 @@ function PartyMemberRow({member, expanded, onToggle, onRemove, onSaveDetails, on
                             <img
                                 src={speciesImageUrl(member.species)}
                                 alt=""
-                                style={{objectPosition: `${anchorFor(member.species) * 100}% ${anchorFor(member.species) * 100}%`}}
+                                //style={{objectPosition: `${anchorFor(member.species) * 100}% ${anchorFor(member.species) * 100}%`}}
+                                style={{objectPosition: `50% ${anchorFor(member.species) * 100}%`}}
                             />
                         </button>
                     )}
