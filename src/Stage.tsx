@@ -41,6 +41,12 @@ interface UserState {
 // tokens restating what rarely changes.
 const DEFAULT_ROSTER_INTERVAL = 6;
 
+// The classifier is awaited inside beforePrompt, which Chub is waiting on, so
+// it needs a ceiling: a single attempt, and all retries together, must finish
+// well inside Chub's own patience for a stage.
+const PIPELINE_TIMEOUT_MS = 12000;
+const CLASSIFIER_BUDGET_MS = 25000;
+
 // Chat-wide (not tied to a branch) record of what the player has set up by
 // hand in the panel: their explicit party edits, and their bag. Both are
 // edited outside the normal lifecycle hooks, so they're persisted straight
@@ -85,6 +91,12 @@ export class Stage extends StageBase<InitStateType, ChatStateType, MessageStateT
     // Panel actions aren't chat messages, so there's nothing to rewrite with
     // the dice the way beforePrompt does for typed input.
     pendingSystemMessage: string|null = null;
+
+    // Directions for a panel action that has already been resolved. The nudge
+    // carries them, and the beforePrompt it triggers hands back the same ones
+    // instead of classifying again - see beforePrompt.
+    pendingDirections: string|null = null;
+    pendingDirectionsAt: number = 0;
 
 
     constructor(data: InitialData<InitStateType, ChatStateType, MessageStateType, ConfigType>) {
@@ -268,6 +280,8 @@ export class Stage extends StageBase<InitStateType, ChatStateType, MessageStateT
     // it reaches the narrator as a directive instead, and the panel shows
     // what happened underneath the reply (see pendingSystemMessage).
     async nudgeWithDirections(directions: string): Promise<void> {
+        this.pendingDirections = directions;
+        this.pendingDirectionsAt = Date.now();
         await this.messenger.nudge({stage_directions: directions});
     }
 
@@ -354,6 +368,21 @@ export class Stage extends StageBase<InitStateType, ChatStateType, MessageStateT
         return new Action(text, domain, difficultyRating, typeModifier, actor);
     }
 
+    // Consumes the directions left by a panel action, if that action is still
+    // the one being serviced. Expires on its own so that a nudge which never
+    // reaches beforePrompt can't leave the next typed action unrolled.
+    lastTakenDirections: string|null = null;
+    takePendingDirections(): string|null {
+        if (this.pendingDirections === null) return null;
+        if (Date.now() - this.pendingDirectionsAt > 20000) {
+            this.pendingDirections = null;
+            return null;
+        }
+        this.lastTakenDirections = this.pendingDirections;
+        this.pendingDirections = null;
+        return this.lastTakenDirections;
+    }
+
     // The [INST] block handed to the LLM for a resolved action.
     buildStageDirections(anonymizedId: string, charName: string = ''): string {
         const prompt = this.replaceTags(this.getUserState(anonymizedId).lastOutcomePrompt, {
@@ -373,6 +402,23 @@ export class Stage extends StageBase<InitStateType, ChatStateType, MessageStateT
         const errorMessage: string|null = null;
         let takenAction: Action|null = null;
         let finalContent: string|undefined = content;
+
+        // Servicing the nudge from a panel action that was already resolved.
+        // Return at once with the directions it computed: classifying here
+        // would roll a second time, on whatever the last typed message was,
+        // and would keep Chub waiting on two more network round-trips - long
+        // enough that it gives up on the stage ("Response timeout for
+        // extension") and generation then fails on a half-built message.
+        if (this.takePendingDirections() !== null) {
+            return {
+                stageDirections: this.lastTakenDirections,
+                messageState: this.buildMessageState(),
+                modifiedMessage: null,
+                systemMessage: null,
+                error: errorMessage,
+                chatState: this.chatState,
+            };
+        }
 
         if (finalContent) {
             this.addAutoPartyMembersFromText(anonymizedId, finalContent);
@@ -409,6 +455,8 @@ export class Stage extends StageBase<InitStateType, ChatStateType, MessageStateT
         // roll is shown here, above the roster, on the reply it produced.
         const panelResult = this.pendingSystemMessage;
         this.pendingSystemMessage = null;
+        // Whatever the panel had queued has now been generated for.
+        this.pendingDirections = null;
 
         return {
             stageDirections: null,
@@ -564,35 +612,46 @@ export class Stage extends StageBase<InitStateType, ChatStateType, MessageStateT
         });
     }
 
-    async awaitPipeline(pipeline: string, eventId: any): Promise<any> {
+    async awaitPipeline(pipeline: string, eventId: any, timeoutMs: number = PIPELINE_TIMEOUT_MS): Promise<any> {
         return new Promise((resolve, reject) => {
             const url = `https://${pipeline}/${eventId}`;
             const evtSource = new EventSource(url, {withCredentials: false});
 
+            // Without this the stream can simply never speak, leaving the
+            // caller awaiting forever. That await is inside beforePrompt, so
+            // a silent backend takes the whole chat down with it: Chub gives
+            // up on the stage and its generation fails half-built.
+            const expiry = setTimeout(() => {
+                evtSource.close();
+                reject(new Error(`Classifier timed out after ${timeoutMs}ms`));
+            }, timeoutMs);
+
+            const settle = (finish: () => void) => {
+                clearTimeout(expiry);
+                evtSource.close();
+                finish();
+            };
+
             evtSource.onmessage = (e) => {
                 try {
                     const data = JSON.parse(e.data);
-                    resolve(data);
-                    evtSource.close();
+                    settle(() => resolve(data));
                 } catch (exception) {
-                    reject(exception);
+                    settle(() => reject(exception));
                 }
             };
 
             evtSource.addEventListener("complete", (e) => {
                 try {
                     const data = JSON.parse((e as MessageEvent).data);
-                    resolve(data);
+                    settle(() => resolve(data));
                 } catch (exception) {
-                    reject(exception);
-                } finally {
-                    evtSource.close();
+                    settle(() => reject(exception));
                 }
             });
 
             evtSource.onerror = (e) => {
-                evtSource.close();
-                reject(e);
+                settle(() => reject(e));
             };
         });
     }
@@ -600,8 +659,11 @@ export class Stage extends StageBase<InitStateType, ChatStateType, MessageStateT
     async query(data: any) {
         let result: any = null;
         let retries = 3;
+        // Retries are also capped by wall clock, so three slow attempts can't
+        // add up to longer than Chub is willing to wait on the stage.
+        const deadline = Date.now() + CLASSIFIER_BUDGET_MS;
         const pipeline = "ravenok-statosphere-backend.hf.space/gradio_api/call/predict";
-        while (retries > 0 && (!result || result.labels.length == 0)) {
+        while (retries > 0 && (!result || result.labels.length == 0) && Date.now() < deadline) {
             try {
                 const request = await fetch(`https://${pipeline}`, {
                     method: "POST",
@@ -613,7 +675,8 @@ export class Stage extends StageBase<InitStateType, ChatStateType, MessageStateT
                 });
 
                 const { event_id } = await request.json();
-                const response = await this.awaitPipeline(pipeline, event_id);
+                const response = await this.awaitPipeline(pipeline, event_id,
+                    Math.max(deadline - Date.now(), 1000));
                 result = JSON.parse(response[0]);
             } catch (error) {
                 console.log(error);
