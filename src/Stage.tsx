@@ -255,16 +255,46 @@ export class Stage extends StageBase<InitStateType, ChatStateType, MessageStateT
     // impersonate() only inserts the message - it never prompts anyone - so
     // without the nudge the message just sits there and the chat stalls.
     async speakAsPlayer(anonymizedId: string, text: string): Promise<void> {
-        await this.messenger.impersonate({speaker_id: anonymizedId, message: text, parent_id: null, is_main: true});
+        const inserted = await this.messenger.impersonate({
+            speaker_id: anonymizedId,
+            message: text,
+            parent_id: null,
+            is_main: true
+        });
 
-        // speaker_id is omitted rather than sent as undefined when there's no
-        // known bot: Chub looks the id up to build the prompt, and a lookup
-        // on undefined fails inside its generation code rather than falling
-        // back to a sensible default.
-        const request: {parent_id: null; is_main: boolean; speaker_id?: string} = {parent_id: null, is_main: true};
+        // Every field is filled in rather than left to a default, matching
+        // how Chub's own stage-integration-test drives a nudge.
+        //
+        // `participants` especially: left out, generation failed with
+        // "can't access property 'extensions'" - Chub falls back to every
+        // participant in the chat and looks each one up among the characters,
+        // so the human player resolves to nothing and is dereferenced anyway.
+        // Naming the bots explicitly keeps users out of that lookup.
+        //
+        // The nudge is also parented to the message just inserted, rather
+        // than to whatever the active leaf happens to be by the time it
+        // arrives.
+        const participants = this.activeCharacterIds();
         const speaker = this.respondingCharacterId();
-        if (speaker) request.speaker_id = speaker;
-        await this.messenger.nudge(request);
+        // Nothing to ask for a reply: leave the player's message sitting in
+        // the chat rather than nudging a speaker that cannot be resolved.
+        if (participants.length === 0 || !speaker) return;
+
+        await this.messenger.nudge({
+            speaker_id: speaker,
+            participants,
+            parent_id: inserted?.identity ?? null,
+            is_main: true,
+            stage_directions: null
+        });
+    }
+
+    // Anonymized IDs of the bots currently in the chat. Read from the dict
+    // keys, which are what Chub matches against.
+    activeCharacterIds(): string[] {
+        return Object.entries(this.characters)
+            .filter(([, character]) => !character.isRemoved)
+            .map(([id]) => id);
     }
 
     // Whichever bot should answer something the panel injected. Prefers one
