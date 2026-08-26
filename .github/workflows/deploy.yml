@@ -143,7 +143,7 @@ jobs:
           # token and the build - only kept here because it was explicitly
           # requested; drop back to a direct https://api.chub.ai/extension/...
           # call if that trust tradeoff stops being acceptable.
-          HTTP_STATUS=$(curl -s -o upload_response.json -w "%{http_code}" -H "CH-API-KEY: ${{ secrets.CHUB_AUTH_TOKEN }}" -F "file=@build.zip" https://chub-relay.jake-h.workers.dev/extensions/${{ env.STAGE_ID }}/)
+          HTTP_STATUS=$(curl -s -o upload_response.json -w "%{http_code}" -H "CH-API-KEY: ${{ secrets.CHUB_AUTH_TOKEN }}" -F "file=@build.zip" https://chub-relay.jake-h.workers.dev/${{ env.STAGE_ID }}/)
           echo "Upload response (HTTP ${HTTP_STATUS}):"
           cat upload_response.json
           echo
