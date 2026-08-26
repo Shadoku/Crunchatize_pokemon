@@ -115,11 +115,17 @@ Write-Host "`n==> Zipping dist/ -> build.zip"
 Compress-Archive -Path (Join-Path $distPath '*') -DestinationPath $zipPath -Force
 
 # --- Upload ---
-Write-Host "`n==> Uploading to https://api.chub.ai/extension/$stageId/upload"
+# Routed through a third-party relay (not chub.ai directly), same as
+# deploy.yml, as a workaround for chub.ai/Cloudflare rejecting GitHub-runner
+# and VPN IPs outright. The relay operator can see the auth token and the
+# build - drop back to https://api.chub.ai/extension/$stageId/upload directly
+# if that trust tradeoff stops being acceptable.
+$uploadUrl = "https://chub-relay.jake-h.workers.dev/$stageId/"
+Write-Host "`n==> Uploading to $uploadUrl"
 $uploadResponseJson = Join-Path $root 'upload_response.json'
 $status = & curl.exe -s -o $uploadResponseJson -w "%{http_code}" `
     -H "CH-API-KEY: $Token" -F "file=@$zipPath" `
-    "https://api.chub.ai/extension/$stageId/upload"
+    $uploadUrl
 
 $responseBody = Get-Content $uploadResponseJson -Raw
 Write-Host "HTTP status: $status"
