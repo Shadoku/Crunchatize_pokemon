@@ -54,6 +54,8 @@ const CLASSIFIER_BUDGET_MS = 25000;
 interface ChatPartyState {
     manualParty: PartyMember[];
     inventory: InventoryItem[];
+    // Whether typed messages are put to the dice. Set from the panel.
+    rollEnabled: boolean;
 }
 
 const DOMAIN_HYPOTHESIS = 'The narrator\'s action principally draws upon {}.';
@@ -87,16 +89,6 @@ export class Stage extends StageBase<InitStateType, ChatStateType, MessageStateT
     globalModifier: number;
     rosterInterval: number;
 
-    // What a panel action did, to be shown under the reply it triggered.
-    // Panel actions aren't chat messages, so there's nothing to rewrite with
-    // the dice the way beforePrompt does for typed input.
-    pendingSystemMessage: string|null = null;
-
-    // Directions for a panel action that has already been resolved. The nudge
-    // carries them, and the beforePrompt it triggers hands back the same ones
-    // instead of classifying again - see beforePrompt.
-    pendingDirections: string|null = null;
-    pendingDirectionsAt: number = 0;
 
 
     constructor(data: InitialData<InitStateType, ChatStateType, MessageStateType, ConfigType>) {
@@ -184,7 +176,7 @@ export class Stage extends StageBase<InitStateType, ChatStateType, MessageStateT
     // the party and the bag live side by side, so a wholesale replace here
     // would silently drop whichever one wasn't being edited.
     async patchChatState(anonymizedId: string, patch: Partial<ChatPartyState>): Promise<void> {
-        const existing = this.chatState[anonymizedId] ?? {manualParty: [], inventory: []};
+        const existing = this.chatState[anonymizedId] ?? {manualParty: [], inventory: [], rollEnabled: true};
         this.chatState = {...this.chatState, [anonymizedId]: {...existing, ...patch}};
         await this.messenger.updateChatState(this.chatState);
     }
@@ -240,10 +232,15 @@ export class Stage extends StageBase<InitStateType, ChatStateType, MessageStateT
         await this.patchChatState(anonymizedId, {inventory});
     }
 
-    // Spends one of an item and announces it in the chat as an ordinary
-    // action, so whether it works is put to the dice like anything else.
-    // The stack is decremented first, and drops off the list at zero.
-    async useInventoryItem(anonymizedId: string, name: string): Promise<void> {
+    // Spends one of an item. The stack drops off the list at zero.
+    //
+    // Nothing is sent to the chat from here. The stage cannot make Chub
+    // generate on its own: impersonating a message and then nudging, and
+    // nudging alone, both ended in Chub timing out on the stage and failing
+    // generation on a half-built message. The player sends the message
+    // themselves through Chub's own input, and the panel just hands them the
+    // item's name to put in it.
+    async spendItem(anonymizedId: string, name: string): Promise<void> {
         const inventory = this.getInventory(anonymizedId);
         const existing = inventory.find(item => sameItem(item.name, name));
         if (!existing) return;
@@ -252,57 +249,16 @@ export class Stage extends StageBase<InitStateType, ChatStateType, MessageStateT
             ? inventory.map(item => sameItem(item.name, name) ? {...item, quantity: item.quantity - 1} : item)
             : inventory.filter(item => !sameItem(item.name, name));
         await this.patchChatState(anonymizedId, {inventory: updated});
-
-        // Using an item is an ordinary action, so it is classified and rolled
-        // for exactly as typed input would be - it just has to be resolved
-        // here, since nothing about it passes through beforePrompt.
-        const text = `I use the ${existing.name}.`;
-        this.addAutoPartyMembersFromText(anonymizedId, text);
-        const action = await this.resolveAction(anonymizedId, text);
-        this.setLastOutcome(anonymizedId, action.determineSuccess());
-
-        // The dice would normally be shown by rewriting the player's message;
-        // with no message to rewrite, they go under the reply instead.
-        this.pendingSystemMessage = this.getUserState(anonymizedId).lastOutcome?.getDescription() ?? null;
-        await this.nudgeWithDirections(this.buildStageDirections(anonymizedId));
     }
 
-    // Asks a bot to respond to something the panel did, carrying the action
-    // itself in the stage directions.
-    //
-    // Nothing is impersonated. Inserting a message as the player and then
-    // nudging is what failed - generation died inside Chub's nudge handler
-    // with "can't access property 'extensions'" no matter which bot, or no
-    // bot, was named. The one shape known to work in a published stage is a
-    // bare nudge carrying only stage_directions, so that is what this sends.
-    //
-    // The cost is that the player's line is no longer its own chat message;
-    // it reaches the narrator as a directive instead, and the panel shows
-    // what happened underneath the reply (see pendingSystemMessage).
-    async nudgeWithDirections(directions: string): Promise<void> {
-        this.pendingDirections = directions;
-        this.pendingDirectionsAt = Date.now();
-        await this.messenger.nudge({stage_directions: directions});
+    // Whether the player's next message goes to the dice. Persisted per
+    // player, so the choice survives a reload; defaults to rolling.
+    isRollEnabled(anonymizedId: string): boolean {
+        return this.chatState[anonymizedId]?.rollEnabled ?? true;
     }
 
-    // Sends the player's text as plain dialogue/narration that's guaranteed
-    // not to trigger a roll. Rolled actions go through Chub's native input
-    // instead, or through item use above.
-    async sendPartyDialogue(anonymizedId: string, text: string): Promise<void> {
-        const trimmed = text.trim();
-        if (!trimmed) return;
-
-        this.addAutoPartyMembersFromText(anonymizedId, trimmed);
-        // No dice: the text is handed over verbatim as what the player said
-        // or did, with the same no-roll instruction beforePrompt would give.
-        this.setLastOutcome(anonymizedId, null);
-        const userName = this.users[anonymizedId]?.name ?? '';
-        const directions = `\n[INST]${userName} says or does the following, which needs no dice roll: ${trimmed}\n`
-            + `${this.replaceTags(ResultDescription[Result.None], {"user": userName, "char": ''})}\n[/INST]`
-            + this.rosterNoteIfDue(anonymizedId);
-
-        this.pendingSystemMessage = `###(No Check) ${trimmed}###`;
-        await this.nudgeWithDirections(directions);
+    async setRollEnabled(anonymizedId: string, rollEnabled: boolean): Promise<void> {
+        await this.patchChatState(anonymizedId, {rollEnabled});
     }
 
     async load(): Promise<Partial<LoadResponse<InitStateType, ChatStateType, MessageStateType>>> {
@@ -368,19 +324,14 @@ export class Stage extends StageBase<InitStateType, ChatStateType, MessageStateT
         return new Action(text, domain, difficultyRating, typeModifier, actor);
     }
 
-    // Consumes the directions left by a panel action, if that action is still
-    // the one being serviced. Expires on its own so that a nudge which never
-    // reaches beforePrompt can't leave the next typed action unrolled.
-    lastTakenDirections: string|null = null;
-    takePendingDirections(): string|null {
-        if (this.pendingDirections === null) return null;
-        if (Date.now() - this.pendingDirectionsAt > 20000) {
-            this.pendingDirections = null;
-            return null;
-        }
-        this.lastTakenDirections = this.pendingDirections;
-        this.pendingDirections = null;
-        return this.lastTakenDirections;
+    // Told to the narrator when the dice are off, so it treats the message as
+    // something that simply happens rather than something to be resolved.
+    buildNoRollDirections(anonymizedId: string, charName: string = ''): string {
+        const instruction = this.replaceTags(ResultDescription[Result.None], {
+            "user": this.users[anonymizedId]?.name ?? '',
+            "char": charName
+        });
+        return `\n[INST]${instruction}\n[/INST]${this.rosterNoteIfDue(anonymizedId)}`;
     }
 
     // The [INST] block handed to the LLM for a resolved action.
@@ -403,17 +354,17 @@ export class Stage extends StageBase<InitStateType, ChatStateType, MessageStateT
         let takenAction: Action|null = null;
         let finalContent: string|undefined = content;
 
-        // Servicing the nudge from a panel action that was already resolved.
-        // Return at once with the directions it computed: classifying here
-        // would roll a second time, on whatever the last typed message was,
-        // and would keep Chub waiting on two more network round-trips - long
-        // enough that it gives up on the stage ("Response timeout for
-        // extension") and generation then fails on a half-built message.
-        if (this.takePendingDirections() !== null) {
+        // Dice turned off from the panel: the message goes through untouched,
+        // with no classification and so no waiting on the classifier either.
+        if (!this.isRollEnabled(anonymizedId)) {
+            if (finalContent) this.addAutoPartyMembersFromText(anonymizedId, finalContent);
+            this.setLastOutcome(anonymizedId, null);
+
             return {
-                stageDirections: this.lastTakenDirections,
+                stageDirections: this.buildNoRollDirections(anonymizedId,
+                    promptForId ? this.characters[promptForId]?.name ?? '' : ''),
                 messageState: this.buildMessageState(),
-                modifiedMessage: null,
+                modifiedMessage: finalContent,
                 systemMessage: null,
                 error: errorMessage,
                 chatState: this.chatState,
@@ -451,19 +402,13 @@ export class Stage extends StageBase<InitStateType, ChatStateType, MessageStateT
             this.getUserState(user.anonymizedId).lastOutcomePrompt = '';
         }
 
-        // A panel action has no message of its own to carry its dice, so the
-        // roll is shown here, above the roster, on the reply it produced.
-        const panelResult = this.pendingSystemMessage;
-        this.pendingSystemMessage = null;
-        // Whatever the panel had queued has now been generated for.
-        this.pendingDirections = null;
 
         return {
             stageDirections: null,
             messageState: this.buildMessageState(),
             modifiedMessage: message.split(/---|\*\*\*|```|system:/i)[0].trim(),
             error: null,
-            systemMessage: [panelResult, this.buildPartySystemMessage()].filter(Boolean).join('\n'),
+            systemMessage: this.buildPartySystemMessage(),
             chatState: this.chatState
         };
     }

@@ -9,6 +9,37 @@ function clampLevel(value: string): number {
     return Math.min(Math.max(Math.floor(Number(value)) || 1, 1), 100);
 }
 
+// Puts text on the clipboard so the player can paste it into Chub's own
+// input box. A stage cannot write into that box itself - it runs in a
+// sandboxed cross-origin iframe and the messenger exposes no way to set the
+// composer's text - so one keystroke away is as close as this gets.
+// execCommand is kept as the fallback: the async clipboard API needs a
+// permission that an embedded frame is not always granted.
+async function copyToClipboard(text: string): Promise<boolean> {
+    try {
+        if (navigator.clipboard?.writeText) {
+            await navigator.clipboard.writeText(text);
+            return true;
+        }
+    } catch {
+        // Blocked or unavailable - fall through to the older route.
+    }
+    try {
+        const carrier = document.createElement('textarea');
+        carrier.value = text;
+        carrier.setAttribute('readonly', '');
+        carrier.style.position = 'fixed';
+        carrier.style.opacity = '0';
+        document.body.appendChild(carrier);
+        carrier.select();
+        const copied = document.execCommand('copy');
+        document.body.removeChild(carrier);
+        return copied;
+    } catch {
+        return false;
+    }
+}
+
 // Renders as its own component (rather than inline in Stage.render()) so it
 // can hold its own re-render state; the Stage instance isn't itself a React
 // component, so button handlers call back into it and then force a refresh.
@@ -70,22 +101,10 @@ function PartyBlock({stage, anonymizedId, name, refresh, onViewPortrait}: {
     onViewPortrait: (species: string) => void;
 }): ReactElement {
     const [expandedSpecies, setExpandedSpecies] = useState<string | null>(null);
-    const [sending, setSending] = useState(false);
     const [addLevel, setAddLevel] = useState(DEFAULT_DETAILS.level);
 
     const party = stage.getFullParty(anonymizedId);
     const partySpecies = new Set(party.map(member => member.species.toLowerCase()));
-
-    async function send(text: string) {
-        if (!text || sending) return;
-        setSending(true);
-        try {
-            await stage.sendPartyDialogue(anonymizedId, text);
-        } finally {
-            setSending(false);
-            refresh();
-        }
-    }
 
     return (
         <div className="crunchatize-party-block">
@@ -141,13 +160,13 @@ function PartyBlock({stage, anonymizedId, name, refresh, onViewPortrait}: {
                 </label>
             </div>
             <InventoryPanel stage={stage} anonymizedId={anonymizedId} refresh={refresh} />
-            <ComposeBox disabled={sending} onSend={send} />
+            <RollToggle stage={stage} anonymizedId={anonymizedId} refresh={refresh} />
         </div>
     );
 }
 
 // The player's bag. Items can be picked from the preset list or typed in by
-// hand; clicking one spends it and announces its use in the chat.
+// hand; clicking one spends it and copies its name for the chat input.
 function InventoryPanel({stage, anonymizedId, refresh}: {
     stage: Stage;
     anonymizedId: string;
@@ -156,6 +175,8 @@ function InventoryPanel({stage, anonymizedId, refresh}: {
     const [name, setName] = useState('');
     const [quantity, setQuantity] = useState(1);
     const [busy, setBusy] = useState(false);
+    // Which item was last copied, and whether the copy actually worked.
+    const [copied, setCopied] = useState<{name: string; ok: boolean} | null>(null);
 
     const inventory = stage.getInventory(anonymizedId);
 
@@ -172,11 +193,14 @@ function InventoryPanel({stage, anonymizedId, refresh}: {
         }
     }
 
+    // Spends one and hands the name over for pasting into the chat input.
     async function use(itemName: string) {
         if (busy) return;
         setBusy(true);
         try {
-            await stage.useInventoryItem(anonymizedId, itemName);
+            const ok = await copyToClipboard(itemName);
+            setCopied({name: itemName, ok});
+            await stage.spendItem(anonymizedId, itemName);
         } finally {
             setBusy(false);
             refresh();
@@ -194,7 +218,7 @@ function InventoryPanel({stage, anonymizedId, refresh}: {
                             type="button"
                             className="crunchatize-bag-use"
                             disabled={busy}
-                            title={`Use one ${item.name}`}
+                            title={`Spend one ${item.name} and copy its name`}
                             onClick={() => use(item.name)}
                         >
                             <span className="crunchatize-bag-name">{item.name}</span>
@@ -213,6 +237,24 @@ function InventoryPanel({stage, anonymizedId, refresh}: {
                     </li>
                 ))}
             </ul>
+            {copied && (
+                // The clipboard can be refused outright in an embedded frame,
+                // so when it is, the name is offered as selectable text
+                // rather than silently doing nothing.
+                <div className="crunchatize-bag-copied">
+                    {copied.ok
+                        ? <span>Copied <strong>{copied.name}</strong> - paste it into the chat box.</span>
+                        : <>
+                            <span>Copy this into the chat box:</span>
+                            <input
+                                type="text"
+                                readOnly
+                                value={copied.name}
+                                onFocus={(event) => event.target.select()}
+                            />
+                        </>}
+                </div>
+            )}
             <select
                 className="crunchatize-party-add"
                 value=""
@@ -264,49 +306,42 @@ function InventoryPanel({stage, anonymizedId, refresh}: {
     );
 }
 
-// The freeform box: anything that shouldn't be put to the dice - dialogue,
-// narration, scene-setting, OOC asides. Ordinary actions go through Chub's
-// own input box below the chat, which rolls as normal.
-function ComposeBox({disabled, onSend}: {
-    disabled: boolean;
-    onSend: (text: string) => void | Promise<void>;
+// Whether the player's typed messages go to the dice. A sticky setting, not
+// a one-shot: it stays where it's put until changed, and is read by
+// beforePrompt when the message actually arrives.
+function RollToggle({stage, anonymizedId, refresh}: {
+    stage: Stage;
+    anonymizedId: string;
+    refresh: () => void;
 }): ReactElement {
-    const [text, setText] = useState('');
-    const trimmed = text.trim();
+    const rolling = stage.isRollEnabled(anonymizedId);
 
-    async function submit() {
-        if (!trimmed || disabled) return;
-        setText('');
-        await onSend(trimmed);
+    async function set(value: boolean) {
+        if (value === rolling) return;
+        await stage.setRollEnabled(anonymizedId, value);
+        refresh();
     }
 
     return (
-        <div className="crunchatize-compose">
-            <div className="crunchatize-compose-header">
-                <span className="crunchatize-compose-label">Freeform</span>
-                <span className="crunchatize-compose-hint">no roll</span>
+        <div className="crunchatize-rolltoggle">
+            <div className="crunchatize-rolltoggle-header">
+                <span className="crunchatize-rolltoggle-label">Your messages</span>
+                <span className="crunchatize-rolltoggle-hint">{rolling ? 'rolls 2d6' : 'no roll'}</span>
             </div>
-            <textarea
-                className="crunchatize-compose-input"
-                rows={2}
-                placeholder="Dialogue, narration, anything not put to the dice..."
-                value={text}
-                disabled={disabled}
-                onChange={(event) => setText(event.target.value)}
-                onKeyDown={(event) => {
-                    // Enter sends; Shift+Enter keeps a newline for longer prose.
-                    if (event.key === 'Enter' && !event.shiftKey) {
-                        event.preventDefault();
-                        submit();
-                    }
-                }}
-            />
-            <button
-                type="button"
-                className="crunchatize-compose-send"
-                disabled={disabled || !trimmed}
-                onClick={submit}
-            >Send</button>
+            <div className="crunchatize-rolltoggle-options" role="group" aria-label="Roll for messages">
+                <button
+                    type="button"
+                    className={`crunchatize-rolltoggle-option${rolling ? ' is-active' : ''}`}
+                    aria-pressed={rolling}
+                    onClick={() => set(true)}
+                >Roll</button>
+                <button
+                    type="button"
+                    className={`crunchatize-rolltoggle-option${rolling ? '' : ' is-active'}`}
+                    aria-pressed={!rolling}
+                    onClick={() => set(false)}
+                >No Roll</button>
+            </div>
         </div>
     );
 }
