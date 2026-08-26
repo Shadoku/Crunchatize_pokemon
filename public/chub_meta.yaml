@@ -100,6 +100,14 @@ config_schema:
       description: Universal modifier added (or subtracted) for all rolls.
       type: integer
       default: 0
+    rosterReminderInterval:
+      title: Roster Reminder Interval
+      description: >-
+        How many messages pass between reminding the bot of your party and bag.
+        The party panel beneath the chat is for you and is never sent to the bot;
+        this is what the bot actually sees. Set to 0 to never remind it.
+      type: integer
+      default: 6
 
 # The schema of the state that you store.
 # This isn't needed even if you do store state,

@@ -31,7 +31,15 @@ interface UserState {
     autoParty: PartyMember[];
     lastOutcome: Outcome|null;
     lastOutcomePrompt: string;
+    // Prompts since the roster was last put in front of the LLM. Lives in
+    // message state so rewinding the chat rewinds the cadence with it.
+    turnsSinceRoster: number;
 }
+
+// How many prompts pass between roster reminders. The roster is reference
+// material, not per-turn instruction, so repeating it every turn just spends
+// tokens restating what rarely changes.
+const DEFAULT_ROSTER_INTERVAL = 6;
 
 // Chat-wide (not tied to a branch) record of what the player has set up by
 // hand in the panel: their explicit party edits, and their bag. Both are
@@ -71,6 +79,7 @@ export class Stage extends StageBase<InitStateType, ChatStateType, MessageStateT
     users: {[key: string]: User} = {};
     characters: {[key: string]: Character} = {};
     globalModifier: number;
+    rosterInterval: number;
 
     // Text the panel injected that must not be rolled on (the freeform box).
     // Matched by content rather than a marker in the message itself: the
@@ -94,6 +103,7 @@ export class Stage extends StageBase<InitStateType, ChatStateType, MessageStateT
         this.users = users;
         this.characters = characters;
         this.globalModifier = config?.difficultyModifier ?? 0;
+        this.rosterInterval = Math.max(config?.rosterReminderInterval ?? DEFAULT_ROSTER_INTERVAL, 0);
         this.chatState = chatState ?? {};
 
         for (const user of Object.values(this.users)) {
@@ -107,7 +117,10 @@ export class Stage extends StageBase<InitStateType, ChatStateType, MessageStateT
         return {
             autoParty: [],
             lastOutcome: null,
-            lastOutcomePrompt: ''
+            lastOutcomePrompt: '',
+            // Starts due, so the LLM gets the roster on the first prompt
+            // rather than only after a full interval has gone by.
+            turnsSinceRoster: this.rosterInterval
         }
     }
 
@@ -291,9 +304,10 @@ export class Stage extends StageBase<InitStateType, ChatStateType, MessageStateT
             this.noRollContent = null;
             this.addAutoPartyMembersFromText(anonymizedId, finalContent);
             this.setLastOutcome(anonymizedId, null);
+            const rosterNote = this.rosterNoteIfDue(anonymizedId);
 
             return {
-                stageDirections: null,
+                stageDirections: rosterNote || null,
                 messageState: this.buildMessageState(),
                 modifiedMessage: finalContent,
                 systemMessage: null,
@@ -357,7 +371,7 @@ export class Stage extends StageBase<InitStateType, ChatStateType, MessageStateT
             stageDirections: `\n[INST]${this.replaceTags(this.getUserState(anonymizedId).lastOutcomePrompt,{
                 "user": this.users[anonymizedId].name,
                 "char": promptForId ? this.characters[promptForId].name : ''
-            })}\n[/INST]`,
+            })}\n[/INST]${this.rosterNoteIfDue(anonymizedId)}`,
             messageState: this.buildMessageState(),
             modifiedMessage: finalContent,
             systemMessage: null,
@@ -385,31 +399,61 @@ export class Stage extends StageBase<InitStateType, ChatStateType, MessageStateT
         };
     }
 
+    // The block shown under each bot message. This is display-only - Chub
+    // never sends system messages to the LLM - so it's kept to what a player
+    // wants at a glance. Held items and movesets live in the panel, where
+    // they can be read on demand instead of restated every turn.
     buildPartySystemMessage(): string {
         const lines: string[] = [];
         for (const user of Object.values(this.users)) {
             const party = this.getFullParty(user.anonymizedId);
             lines.push(`${user.name}'s Party: ${party.length > 0
-                ? party.map(member => this.describePartyMember(member)).join(', ')
+                ? party.map(member => `${member.species} (${typesOf(member).join('/') || '???'}) Lv.${detailsOf(member).level}`).join(', ')
                 : 'No moemon yet'}`);
 
-            const inventory = this.getInventory(user.anonymizedId);
-            if (inventory.length > 0) {
-                lines.push(`${user.name}'s Bag: ${inventory.map(item => `${item.name} x${item.quantity}`).join(', ')}`);
-            }
+            const bag = this.describeBag(user.anonymizedId);
+            if (bag) lines.push(`${user.name}'s Bag: ${bag}`);
         }
         return '---\n```' + lines.join('\n') + '```';
     }
 
-    // Compact roster line for one member, including the editable build info
-    // (level/item/moves) so it actually informs narration, not just the panel.
-    describePartyMember(member: PartyMember): string {
-        const details = detailsOf(member);
-        const parts = [`Lv.${details.level}`];
-        if (details.heldItem) parts.push(`Item: ${details.heldItem}`);
-        const moves = details.moves.filter(move => move.trim().length > 0);
-        if (moves.length > 0) parts.push(`Moves: ${moves.join(', ')}`);
-        return `${member.species} (${typesOf(member).join('/') || '???'}) ${parts.join(' | ')}`;
+    describeBag(anonymizedId: string): string {
+        return this.getInventory(anonymizedId)
+            .map(item => `${item.name} x${item.quantity}`)
+            .join(', ');
+    }
+
+    // Roster reference for the LLM, appended to the prompt every
+    // rosterInterval turns rather than every turn. Movesets are deliberately
+    // left out: they're the bulkiest part and the narrator doesn't need a
+    // move list to describe what a moemon does.
+    buildRosterNote(anonymizedId: string): string {
+        const user = this.users[anonymizedId];
+        if (!user) return '';
+
+        const party = this.getFullParty(anonymizedId);
+        const roster = party.length > 0
+            ? party.map(member => {
+                const details = detailsOf(member);
+                const held = details.heldItem ? `, holding ${details.heldItem}` : '';
+                return `${member.species} (${typesOf(member).join('/') || '???'}-type, Lv.${details.level}${held})`;
+            }).join('; ')
+            : 'no moemon';
+
+        const bag = this.describeBag(anonymizedId);
+        return `${user.name}'s party: ${roster}.${bag ? ` Carrying: ${bag}.` : ''}`;
+    }
+
+    // Counts down to the next roster reminder, returning the note only on the
+    // turns it's actually due.
+    rosterNoteIfDue(anonymizedId: string): string {
+        if (this.rosterInterval <= 0) return '';
+        const userState = this.getUserState(anonymizedId);
+        userState.turnsSinceRoster = (userState.turnsSinceRoster ?? 0) + 1;
+        if (userState.turnsSinceRoster < this.rosterInterval) return '';
+        userState.turnsSinceRoster = 0;
+        const note = this.buildRosterNote(anonymizedId);
+        return note ? `\n[INST]${note}[/INST]` : '';
     }
 
     setStateFromMessageState(messageState: MessageStateType) {
@@ -426,10 +470,14 @@ export class Stage extends StageBase<InitStateType, ChatStateType, MessageStateT
                 const lastOutcome = messageState[user.anonymizedId]?.['lastOutcome'] ?? null;
                 userState.lastOutcome = lastOutcome ? this.convertOutcome(lastOutcome) : null;
                 userState.lastOutcomePrompt = messageState[user.anonymizedId]?.['lastOutcomePrompt'] ?? '';
+                // Rewinding the chat rewinds the reminder cadence too, so a
+                // swiped-away turn doesn't leave the counter out of step.
+                userState.turnsSinceRoster = messageState[user.anonymizedId]?.['turnsSinceRoster'] ?? this.rosterInterval;
             } else {
                 userState.autoParty = [];
                 userState.lastOutcome = null;
                 userState.lastOutcomePrompt = '';
+                userState.turnsSinceRoster = this.rosterInterval;
             }
             this.userState[user.anonymizedId] = userState;
         }
@@ -450,7 +498,8 @@ export class Stage extends StageBase<InitStateType, ChatStateType, MessageStateT
             messageState[user.anonymizedId] = {
                 autoParty: userState.autoParty,
                 lastOutcome: userState.lastOutcome ?? null,
-                lastOutcomePrompt: userState.lastOutcomePrompt ?? ''
+                lastOutcomePrompt: userState.lastOutcomePrompt ?? '',
+                turnsSinceRoster: userState.turnsSinceRoster ?? 0
             };
         }
         return messageState;
