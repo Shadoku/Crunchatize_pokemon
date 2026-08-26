@@ -5,7 +5,8 @@ import {Action} from "./Action";
 import {Outcome, Result, ResultDescription} from "./Outcome";
 import {MoemonType, TypeDomainDescription, bestEffectiveness, modifierForMultiplier} from "./MoemonType";
 import {getSpecies, findSpeciesMentions} from "./Lore";
-import {PartyMember, PartyMemberDetails, DEFAULT_DETAILS, detailsOf, typesOf} from "./Party";
+import {PartyMember, PartyMemberDetails, detailsOf, typesOf} from "./Party";
+import {defaultDetailsFor} from "./Moveset";
 import {PartyPanel} from "./PartyPanel";
 
 // Prefix used to mark a message sent via the panel's freeform box so
@@ -142,7 +143,7 @@ export class Stage extends StageBase<InitStateType, ChatStateType, MessageStateT
         const alreadyKnown = this.getFullParty(anonymizedId).some(member => member.species.toLowerCase() === species.toLowerCase());
         if (!alreadyKnown) {
             const userState = this.getUserState(anonymizedId);
-            userState.autoParty = [...userState.autoParty, {species, source: 'auto', details: DEFAULT_DETAILS} as PartyMember];
+            userState.autoParty = [...userState.autoParty, {species, source: 'auto', details: defaultDetailsFor(species)} as PartyMember];
         }
     }
 
@@ -160,7 +161,7 @@ export class Stage extends StageBase<InitStateType, ChatStateType, MessageStateT
         if (existing.some(member => member.species.toLowerCase() === species.toLowerCase())) return;
         this.chatState = {
             ...this.chatState,
-            [anonymizedId]: {manualParty: [...existing, {species, source: 'manual', details: DEFAULT_DETAILS} as PartyMember]}
+            [anonymizedId]: {manualParty: [...existing, {species, source: 'manual', details: defaultDetailsFor(species)} as PartyMember]}
         };
         await this.messenger.updateChatState(this.chatState);
     }
@@ -352,7 +353,10 @@ export class Stage extends StageBase<InitStateType, ChatStateType, MessageStateT
                 const rawParty = messageState[user.anonymizedId]?.['autoParty'] ?? [];
                 userState.autoParty = (Array.isArray(rawParty) ? rawParty : [])
                     .filter((member: any) => member && typeof member.species === 'string' && getSpecies(member.species))
-                    .map((member: any) => ({species: member.species, source: 'auto', details: DEFAULT_DETAILS}));
+                    // Details are regenerated rather than read back: they're
+                    // deterministic per species, so auto members always show
+                    // their species defaults without bloating message state.
+                    .map((member: any) => ({species: member.species, source: 'auto', details: defaultDetailsFor(member.species)}));
                 const lastOutcome = messageState[user.anonymizedId]?.['lastOutcome'] ?? null;
                 userState.lastOutcome = lastOutcome ? this.convertOutcome(lastOutcome) : null;
                 userState.lastOutcomePrompt = messageState[user.anonymizedId]?.['lastOutcomePrompt'] ?? '';

@@ -149,7 +149,19 @@ function PartyMemberRow({member, expanded, onToggle, onRemove, onSaveDetails}: {
 
     return (
         <li className="crunchatize-party-member">
-            <div className="crunchatize-party-member-row">
+            <div
+                className="crunchatize-party-member-row"
+                role="button"
+                tabIndex={0}
+                aria-expanded={expanded}
+                onClick={onToggle}
+                onKeyDown={(event) => {
+                    if (event.key === 'Enter' || event.key === ' ') {
+                        event.preventDefault();
+                        onToggle();
+                    }
+                }}
+            >
                 {imageOk ? (
                     <img
                         className="crunchatize-party-image"
@@ -164,9 +176,7 @@ function PartyMemberRow({member, expanded, onToggle, onRemove, onSaveDetails}: {
                         {member.species.charAt(0)}
                     </span>
                 )}
-                <button type="button" className="crunchatize-party-name" onClick={onToggle}>
-                    {member.species}
-                </button>
+                <span className="crunchatize-party-name">{member.species}</span>
                 <span className="crunchatize-party-level">Lv.{details.level}</span>
                 <span className="crunchatize-party-types">
                     {(info?.types ?? []).map(type => (
@@ -176,7 +186,12 @@ function PartyMemberRow({member, expanded, onToggle, onRemove, onSaveDetails}: {
                 <button
                     className="crunchatize-party-remove"
                     aria-label={`Remove ${member.species}`}
-                    onClick={onRemove}
+                    onClick={(event) => {
+                        // Otherwise removing a member would also toggle the
+                        // row it lives in.
+                        event.stopPropagation();
+                        onRemove();
+                    }}
                 >×</button>
             </div>
             {expanded && <PartyMemberEditor details={details} onSave={onSaveDetails} onCancel={onToggle} />}
