@@ -28,20 +28,14 @@ function PartyBlock({stage, anonymizedId, name, refresh}: {
     refresh: () => void;
 }): ReactElement {
     const [expandedSpecies, setExpandedSpecies] = useState<string | null>(null);
-    const [actionText, setActionText] = useState('');
     const [sending, setSending] = useState(false);
 
     const party = stage.getFullParty(anonymizedId);
     const partySpecies = new Set(party.map(member => member.species.toLowerCase()));
 
-    // Enter and the "Send Dialogue" button both default to no-roll, per the
-    // panel replacing Chub's own input box; "Send Action" is the deliberate
-    // second step for anyone who wants a roll.
-    async function send(dialogue: boolean) {
-        const text = actionText.trim();
+    async function send(dialogue: boolean, text: string) {
         if (!text || sending) return;
         setSending(true);
-        setActionText('');
         try {
             if (dialogue) {
                 await stage.sendPartyDialogue(anonymizedId, text);
@@ -94,34 +88,72 @@ function PartyBlock({stage, anonymizedId, name, refresh}: {
                     .filter(name => !partySpecies.has(name.toLowerCase()))
                     .map(name => <option key={name} value={name}>{name}</option>)}
             </select>
-            <div className="crunchatize-action-bar">
-                <input
-                    className="crunchatize-action-input"
-                    type="text"
-                    placeholder="Say or do something..."
-                    value={actionText}
-                    disabled={sending}
-                    onChange={(event) => setActionText(event.target.value)}
-                    onKeyDown={(event) => {
-                        if (event.key === 'Enter') {
-                            event.preventDefault();
-                            send(true);
-                        }
-                    }}
-                />
-                <button
-                    type="button"
-                    className="crunchatize-action-send crunchatize-action-send-dialogue"
-                    disabled={sending || !actionText.trim()}
-                    onClick={() => send(true)}
-                >Send Dialogue</button>
-                <button
-                    type="button"
-                    className="crunchatize-action-send crunchatize-action-send-action"
-                    disabled={sending || !actionText.trim()}
-                    onClick={() => send(false)}
-                >Send Action</button>
+            <ComposeBox
+                variant="say"
+                label="Say"
+                hint="no dice"
+                placeholder="Speak or narrate freely..."
+                disabled={sending}
+                onSend={(text) => send(true, text)}
+            />
+            <ComposeBox
+                variant="do"
+                label="Do"
+                hint="rolls 2d6"
+                placeholder="Attempt something risky..."
+                disabled={sending}
+                onSend={(text) => send(false, text)}
+            />
+        </div>
+    );
+}
+
+// One labelled compose surface. Kept separate per kind (rather than one field
+// with two buttons) so it's unambiguous which sort of input is being written.
+function ComposeBox({variant, label, hint, placeholder, disabled, onSend}: {
+    variant: 'say' | 'do';
+    label: string;
+    hint: string;
+    placeholder: string;
+    disabled: boolean;
+    onSend: (text: string) => void | Promise<void>;
+}): ReactElement {
+    const [text, setText] = useState('');
+    const trimmed = text.trim();
+
+    async function submit() {
+        if (!trimmed || disabled) return;
+        setText('');
+        await onSend(trimmed);
+    }
+
+    return (
+        <div className={`crunchatize-compose crunchatize-compose--${variant}`}>
+            <div className="crunchatize-compose-header">
+                <span className="crunchatize-compose-label">{label}</span>
+                <span className="crunchatize-compose-hint">{hint}</span>
             </div>
+            <textarea
+                className="crunchatize-compose-input"
+                rows={2}
+                placeholder={placeholder}
+                value={text}
+                disabled={disabled}
+                onChange={(event) => setText(event.target.value)}
+                onKeyDown={(event) => {
+                    // Enter sends; Shift+Enter keeps a newline for longer prose.
+                    if (event.key === 'Enter' && !event.shiftKey) {
+                        event.preventDefault();
+                        submit();
+                    }
+                }}
+            />
+            <button
+                type="button"
+                className="crunchatize-compose-send"
+                disabled={disabled || !trimmed}
+                onClick={submit}
+            >{label}</button>
         </div>
     );
 }
@@ -140,19 +172,29 @@ function PartyMemberRow({member, expanded, onToggle, onRemove, onSaveDetails}: {
     return (
         <li className="crunchatize-party-member">
             <div className="crunchatize-party-member-row">
-                {imageOk && (
+                {imageOk ? (
                     <img
                         className="crunchatize-party-image"
                         src={speciesImageUrl(member.species)}
                         alt=""
                         onError={() => setImageOk(false)}
                     />
+                ) : (
+                    // Keeps the row height stable (and shows where artwork
+                    // would go) until a PNG is dropped into public/moemon.
+                    <span className="crunchatize-party-image crunchatize-party-image--empty" aria-hidden="true">
+                        {member.species.charAt(0)}
+                    </span>
                 )}
                 <button type="button" className="crunchatize-party-name" onClick={onToggle}>
                     {member.species}
                 </button>
                 <span className="crunchatize-party-level">Lv.{details.level}</span>
-                <span className="crunchatize-party-types">{(info?.types ?? []).join('/')}</span>
+                <span className="crunchatize-party-types">
+                    {(info?.types ?? []).map(type => (
+                        <span key={type} className={`crunchatize-type crunchatize-type--${type.toLowerCase()}`}>{type}</span>
+                    ))}
+                </span>
                 <button
                     className="crunchatize-party-remove"
                     aria-label={`Remove ${member.species}`}
@@ -176,7 +218,7 @@ function PartyMemberEditor({details, onSave, onCancel}: {
     return (
         <div className="crunchatize-party-editor">
             <label className="crunchatize-party-editor-field">
-                Level
+                <span className="crunchatize-party-editor-label">Level</span>
                 <input
                     type="number"
                     min={1}
@@ -186,12 +228,12 @@ function PartyMemberEditor({details, onSave, onCancel}: {
                 />
             </label>
             <label className="crunchatize-party-editor-field">
-                Held Item
+                <span className="crunchatize-party-editor-label">Held Item</span>
                 <input type="text" value={heldItem} onChange={(event) => setHeldItem(event.target.value)} />
             </label>
             {moves.map((move, index) => (
                 <label className="crunchatize-party-editor-field" key={index}>
-                    Move {index + 1}
+                    <span className="crunchatize-party-editor-label">Move {index + 1}</span>
                     <input
                         type="text"
                         value={move}

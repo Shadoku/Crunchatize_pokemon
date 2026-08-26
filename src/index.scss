@@ -5,43 +5,82 @@
   -moz-osx-font-smoothing: grayscale;
 }
 
-// Ensure that everything is transparent,
-// so that the chat page can be seen through the stage
-* {
-  background-color: transparent !important;
-  overflow: hidden !important;
-}
-
+// Only the document itself is transparent, so the chat page shows through
+// around the panel. The panel draws its own surface (see below) - it sits on
+// top of arbitrary chat artwork, so it can't rely on inheriting a readable
+// background.
 html, body, #root {
   margin: 0;
   padding: 0;
+  background-color: transparent;
 }
 
+// Panel surface + ink. Tuned to stay legible over any chat background.
+$surface: #171a24;
+$surface-raised: #212533;
+$surface-sunken: #10121a;
+$ink: #f2f4f8;
+$ink-dim: #a7aec2;
+$line: #333a4d;
+$accent-say: #6fd3a6;
+$accent-do: #f0a65a;
+
+// Type colors, lightened from the classic palette so they read as text on a
+// dark surface rather than as flat sprites.
+$type-colors: (
+  normal: #c6c6a7, fire: #ff9d5a, water: #7fa9f8, electric: #ffe04d,
+  grass: #96de6c, ice: #a9e6e3, fighting: #f0605a, poison: #d06bce,
+  ground: #edd07f, flying: #c0aeff, psychic: #ff7fa6, bug: #c7da2e,
+  rock: #d6c356, ghost: #a38bc7, dragon: #9b6fff, dark: #a89482,
+  steel: #d2d2e6, fairy: #f0a5c9
+);
+
 .crunchatize-party-panel {
+  box-sizing: border-box;
   display: flex;
   flex-direction: column;
-  gap: 0.5em;
-  padding: 0.5em;
-  font-family: sans-serif;
-  font-size: 0.85em;
-  color: inherit;
+  gap: 0.75rem;
+  padding: 0.75rem;
   max-height: 100%;
-  overflow-y: auto !important;
+  overflow-y: auto;
+
+  font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
+  font-size: 15px;
+  line-height: 1.4;
+  color: $ink;
+
+  background-color: rgba(23, 26, 36, 0.92);
+  backdrop-filter: blur(6px);
+  border: 1px solid $line;
+  border-radius: 0.6rem;
+
+  // Makes native select dropdowns and scrollbars render dark to match.
+  color-scheme: dark;
+
+  * {
+    box-sizing: border-box;
+  }
 }
 
 .crunchatize-party-block {
   display: flex;
   flex-direction: column;
-  gap: 0.25em;
+  gap: 0.5rem;
 }
 
 .crunchatize-party-title {
-  font-weight: bold;
+  font-size: 0.95rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: $ink-dim;
+  padding-bottom: 0.4rem;
+  border-bottom: 1px solid $line;
 }
 
 .crunchatize-party-empty {
   font-style: italic;
-  opacity: 0.7;
+  color: $ink-dim;
 }
 
 .crunchatize-party-list {
@@ -50,120 +89,275 @@ html, body, #root {
   padding: 0;
   display: flex;
   flex-direction: column;
-  gap: 0.15em;
+  gap: 0.4rem;
 }
 
 .crunchatize-party-member {
   display: flex;
   flex-direction: column;
-  gap: 0.25em;
+  background-color: $surface-raised;
+  border: 1px solid $line;
+  border-radius: 0.5rem;
+  overflow: hidden;
 }
 
 .crunchatize-party-member-row {
   display: flex;
   align-items: center;
-  gap: 0.5em;
+  gap: 0.55rem;
+  padding: 0.45rem 0.55rem;
 }
 
 .crunchatize-party-image {
-  width: 1.75em;
-  height: 1.75em;
-  border-radius: 0.25em;
+  width: 2.4rem;
+  height: 2.4rem;
+  border-radius: 0.35rem;
   object-fit: cover;
   flex-shrink: 0;
+  background-color: $surface-sunken;
+}
+
+.crunchatize-party-image--empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: rgba(167, 174, 194, 0.5);
+  border: 1px dashed $line;
 }
 
 .crunchatize-party-name {
-  font-weight: 600;
+  font: inherit;
+  font-weight: 650;
+  font-size: 1rem;
+  color: $ink;
   cursor: pointer;
   border: none;
   background: none;
-  color: inherit;
   padding: 0;
-  font: inherit;
-  text-decoration: underline dotted;
+  text-align: left;
+
+  &:hover {
+    color: #fff;
+    text-decoration: underline;
+  }
 }
 
 .crunchatize-party-level {
-  opacity: 0.75;
+  flex-shrink: 0;
+  font-size: 0.8rem;
+  font-weight: 600;
   font-variant-numeric: tabular-nums;
+  color: $ink-dim;
+  background-color: $surface-sunken;
+  border: 1px solid $line;
+  border-radius: 999px;
+  padding: 0.05rem 0.45rem;
 }
 
 .crunchatize-party-types {
-  opacity: 0.75;
+  display: flex;
+  gap: 0.25rem;
+  margin-left: auto;
+}
+
+.crunchatize-type {
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  border-radius: 0.25rem;
+  padding: 0.1rem 0.4rem;
+  white-space: nowrap;
+}
+
+@each $name, $color in $type-colors {
+  .crunchatize-type--#{$name} {
+    color: $color;
+    background-color: rgba($color, 0.16);
+    border: 1px solid rgba($color, 0.45);
+  }
 }
 
 .crunchatize-party-remove {
-  margin-left: auto;
+  flex-shrink: 0;
   cursor: pointer;
-  border: 1px solid currentColor;
-  border-radius: 0.25em;
-  background: none;
+  font: inherit;
+  font-size: 1rem;
   line-height: 1;
-  padding: 0 0.4em;
+  color: $ink-dim;
+  background: none;
+  border: 1px solid $line;
+  border-radius: 0.3rem;
+  padding: 0.15rem 0.4rem;
+
+  &:hover {
+    color: #ff8a8a;
+    border-color: #ff8a8a;
+  }
 }
 
 .crunchatize-party-add {
-  width: fit-content;
+  font: inherit;
+  font-size: 0.9rem;
+  color: $ink;
+  background-color: $surface-raised;
+  border: 1px solid $line;
+  border-radius: 0.4rem;
+  padding: 0.35rem 0.5rem;
+  cursor: pointer;
+
+  &:hover {
+    border-color: $ink-dim;
+  }
 }
 
 .crunchatize-party-editor {
   display: flex;
   flex-direction: column;
-  gap: 0.25em;
-  padding: 0.4em 0.5em;
-  margin-left: 2.25em;
-  border: 1px solid currentColor;
-  border-radius: 0.3em;
-  opacity: 0.9;
+  gap: 0.4rem;
+  padding: 0.6rem;
+  background-color: $surface-sunken;
+  border-top: 1px solid $line;
 }
 
 .crunchatize-party-editor-field {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 0.5em;
+  gap: 0.5rem;
+  font-size: 0.82rem;
+  color: $ink-dim;
 
   input {
     flex: 1;
     min-width: 0;
-    max-width: 60%;
+    font: inherit;
+    font-size: 0.88rem;
+    color: $ink;
+    background-color: $surface;
+    border: 1px solid $line;
+    border-radius: 0.3rem;
+    padding: 0.25rem 0.4rem;
+
+    &:focus {
+      outline: none;
+      border-color: $ink-dim;
+    }
   }
+}
+
+.crunchatize-party-editor-label {
+  flex: 0 0 4.5rem;
 }
 
 .crunchatize-party-editor-actions {
   display: flex;
-  gap: 0.5em;
+  gap: 0.4rem;
   justify-content: flex-end;
-  margin-top: 0.15em;
-}
+  margin-top: 0.15rem;
 
-.crunchatize-action-bar {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.35em;
-  margin-top: 0.25em;
-}
+  button {
+    font: inherit;
+    font-size: 0.85rem;
+    font-weight: 600;
+    cursor: pointer;
+    color: $ink;
+    background-color: $surface-raised;
+    border: 1px solid $line;
+    border-radius: 0.35rem;
+    padding: 0.25rem 0.7rem;
 
-.crunchatize-action-input {
-  flex: 1;
-  min-width: 8em;
-}
-
-.crunchatize-action-send {
-  cursor: pointer;
-  border: 1px solid currentColor;
-  border-radius: 0.25em;
-  padding: 0.2em 0.6em;
-  background: none;
-  color: inherit;
-
-  &:disabled {
-    cursor: default;
-    opacity: 0.5;
+    &:hover {
+      border-color: $ink-dim;
+    }
   }
 }
 
-.crunchatize-action-send-dialogue {
-  font-weight: 600;
+// Two separate compose boxes: "Say" never rolls, "Do" goes through the dice.
+// Each is its own labelled surface so there's no ambiguity about which kind
+// of input you're writing.
+.crunchatize-compose {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  padding: 0.5rem;
+  background-color: $surface-raised;
+  border: 1px solid $line;
+  border-left: 3px solid $line;
+  border-radius: 0.45rem;
+}
+
+.crunchatize-compose-header {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+}
+
+.crunchatize-compose-label {
+  font-size: 0.8rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.crunchatize-compose-hint {
+  font-size: 0.75rem;
+  color: $ink-dim;
+  margin-left: auto;
+}
+
+.crunchatize-compose-input {
+  font: inherit;
+  font-size: 0.92rem;
+  color: $ink;
+  background-color: $surface-sunken;
+  border: 1px solid $line;
+  border-radius: 0.35rem;
+  padding: 0.4rem 0.5rem;
+  resize: vertical;
+  min-height: 2.6rem;
+
+  &::placeholder {
+    color: rgba(167, 174, 194, 0.7);
+  }
+
+  &:focus {
+    outline: none;
+  }
+}
+
+.crunchatize-compose-send {
+  align-self: flex-end;
+  font: inherit;
+  font-size: 0.85rem;
+  font-weight: 700;
+  cursor: pointer;
+  border-radius: 0.35rem;
+  padding: 0.3rem 0.9rem;
+  color: $surface-sunken;
+  border: 1px solid transparent;
+
+  &:disabled {
+    cursor: default;
+    opacity: 0.45;
+  }
+}
+
+.crunchatize-compose--say {
+  border-left-color: $accent-say;
+
+  .crunchatize-compose-label { color: $accent-say; }
+  .crunchatize-compose-input:focus { border-color: $accent-say; }
+  .crunchatize-compose-send { background-color: $accent-say; }
+  .crunchatize-compose-send:not(:disabled):hover { background-color: lighten($accent-say, 8%); }
+}
+
+.crunchatize-compose--do {
+  border-left-color: $accent-do;
+
+  .crunchatize-compose-label { color: $accent-do; }
+  .crunchatize-compose-input:focus { border-color: $accent-do; }
+  .crunchatize-compose-send { background-color: $accent-do; }
+  .crunchatize-compose-send:not(:disabled):hover { background-color: lighten($accent-do, 8%); }
 }
