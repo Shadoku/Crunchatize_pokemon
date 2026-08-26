@@ -54,6 +54,20 @@ export function getSpecies(name: string): SpeciesInfo | undefined {
     return speciesIndex.get(name.toLowerCase());
 }
 
+// Turns a species name into the filename (minus extension) the party panel
+// looks for in public/moemon/, e.g. "Nidoran♀" -> "nidoranf".
+function slugifySpecies(name: string): string {
+    return name
+        .toLowerCase()
+        .replace(/♀/g, 'f')
+        .replace(/♂/g, 'm')
+        .replace(/[^a-z0-9]/g, '');
+}
+
+export function speciesImageUrl(name: string): string {
+    return `/moemon/${slugifySpecies(name)}.png`;
+}
+
 // Finds every lorebook species mentioned by name in a block of free text,
 // e.g. narration or a user's action, in longest-match-first order.
 export function findSpeciesMentions(text: string): string[] {

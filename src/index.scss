@@ -55,12 +55,38 @@ html, body, #root {
 
 .crunchatize-party-member {
   display: flex;
+  flex-direction: column;
+  gap: 0.25em;
+}
+
+.crunchatize-party-member-row {
+  display: flex;
   align-items: center;
   gap: 0.5em;
 }
 
+.crunchatize-party-image {
+  width: 1.75em;
+  height: 1.75em;
+  border-radius: 0.25em;
+  object-fit: cover;
+  flex-shrink: 0;
+}
+
 .crunchatize-party-name {
   font-weight: 600;
+  cursor: pointer;
+  border: none;
+  background: none;
+  color: inherit;
+  padding: 0;
+  font: inherit;
+  text-decoration: underline dotted;
+}
+
+.crunchatize-party-level {
+  opacity: 0.75;
+  font-variant-numeric: tabular-nums;
 }
 
 .crunchatize-party-types {
@@ -79,4 +105,65 @@ html, body, #root {
 
 .crunchatize-party-add {
   width: fit-content;
+}
+
+.crunchatize-party-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25em;
+  padding: 0.4em 0.5em;
+  margin-left: 2.25em;
+  border: 1px solid currentColor;
+  border-radius: 0.3em;
+  opacity: 0.9;
+}
+
+.crunchatize-party-editor-field {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5em;
+
+  input {
+    flex: 1;
+    min-width: 0;
+    max-width: 60%;
+  }
+}
+
+.crunchatize-party-editor-actions {
+  display: flex;
+  gap: 0.5em;
+  justify-content: flex-end;
+  margin-top: 0.15em;
+}
+
+.crunchatize-action-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35em;
+  margin-top: 0.25em;
+}
+
+.crunchatize-action-input {
+  flex: 1;
+  min-width: 8em;
+}
+
+.crunchatize-action-send {
+  cursor: pointer;
+  border: 1px solid currentColor;
+  border-radius: 0.25em;
+  padding: 0.2em 0.6em;
+  background: none;
+  color: inherit;
+
+  &:disabled {
+    cursor: default;
+    opacity: 0.5;
+  }
+}
+
+.crunchatize-action-send-dialogue {
+  font-weight: 600;
 }

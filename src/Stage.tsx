@@ -5,8 +5,15 @@ import {Action} from "./Action";
 import {Outcome, Result, ResultDescription} from "./Outcome";
 import {MoemonType, TypeDomainDescription, bestEffectiveness, modifierForMultiplier} from "./MoemonType";
 import {getSpecies, findSpeciesMentions} from "./Lore";
-import {PartyMember, typesOf} from "./Party";
+import {PartyMember, PartyMemberDetails, DEFAULT_DETAILS, detailsOf, typesOf} from "./Party";
 import {PartyPanel} from "./PartyPanel";
+
+// Prefix used to mark a message sent via the panel's "Send Dialogue" button
+// so beforePrompt skips classification/rolling entirely. Always stripped
+// before the message is displayed, and since the panel replaces Chub's own
+// input box (see load()), every user message the stage ever sees originates
+// from one of our two send buttons - no risk of colliding with organic text.
+const NO_ROLL_MARKER = '[[NOROLL]]';
 
 type MessageStateType = any;
 
@@ -135,7 +142,7 @@ export class Stage extends StageBase<InitStateType, ChatStateType, MessageStateT
         const alreadyKnown = this.getFullParty(anonymizedId).some(member => member.species.toLowerCase() === species.toLowerCase());
         if (!alreadyKnown) {
             const userState = this.getUserState(anonymizedId);
-            userState.autoParty = [...userState.autoParty, {species, source: 'auto'}];
+            userState.autoParty = [...userState.autoParty, {species, source: 'auto', details: DEFAULT_DETAILS} as PartyMember];
         }
     }
 
@@ -153,7 +160,7 @@ export class Stage extends StageBase<InitStateType, ChatStateType, MessageStateT
         if (existing.some(member => member.species.toLowerCase() === species.toLowerCase())) return;
         this.chatState = {
             ...this.chatState,
-            [anonymizedId]: {manualParty: [...existing, {species, source: 'manual'} as PartyMember]}
+            [anonymizedId]: {manualParty: [...existing, {species, source: 'manual', details: DEFAULT_DETAILS} as PartyMember]}
         };
         await this.messenger.updateChatState(this.chatState);
     }
@@ -166,7 +173,37 @@ export class Stage extends StageBase<InitStateType, ChatStateType, MessageStateT
         await this.messenger.updateChatState(this.chatState);
     }
 
+    // Saves edited level/moves/held item for a party member, whether it was
+    // previously manual, auto-only, or brand new - "editing" always targets
+    // a member currently surfaced by getFullParty, so this always promotes
+    // it into the persisted, chat-wide roster.
+    async updatePartyMemberDetails(anonymizedId: string, species: string, details: PartyMemberDetails): Promise<void> {
+        if (!getSpecies(species)) return;
+        const withoutSpecies = this.getManualParty(anonymizedId).filter(member => member.species.toLowerCase() !== species.toLowerCase());
+        this.chatState = {
+            ...this.chatState,
+            [anonymizedId]: {manualParty: [...withoutSpecies, {species, source: 'manual', details} as PartyMember]}
+        };
+        await this.messenger.updateChatState(this.chatState);
+    }
+
+    // Sends the player's text as a normal action, subject to the usual
+    // classify-and-roll pipeline in beforePrompt.
+    async sendPartyAction(anonymizedId: string, text: string): Promise<void> {
+        await this.messenger.impersonate({speaker_id: anonymizedId, message: text, parent_id: null, is_main: true});
+    }
+
+    // Sends the player's text as plain dialogue/narration that's guaranteed
+    // not to trigger a roll - see the NO_ROLL_MARKER handling in beforePrompt.
+    async sendPartyDialogue(anonymizedId: string, text: string): Promise<void> {
+        await this.messenger.impersonate({speaker_id: anonymizedId, message: NO_ROLL_MARKER + text, parent_id: null, is_main: true});
+    }
+
     async load(): Promise<Partial<LoadResponse<InitStateType, ChatStateType, MessageStateType>>> {
+        // The party panel's own action bar (see PartyPanel) replaces free
+        // typing entirely, so Chub's native chat input is hidden.
+        await this.messenger.updateEnvironment({input_enabled: false});
+
         return {
             success: true,
             error: null,
@@ -189,6 +226,23 @@ export class Stage extends StageBase<InitStateType, ChatStateType, MessageStateT
         const errorMessage: string|null = null;
         let takenAction: Action|null = null;
         let finalContent: string|undefined = content;
+
+        // Sent via the panel's "Send Dialogue" button: skip classification
+        // and rolling entirely, and just pass the (unmarked) text through.
+        if (finalContent?.startsWith(NO_ROLL_MARKER)) {
+            finalContent = finalContent.slice(NO_ROLL_MARKER.length);
+            this.addAutoPartyMembersFromText(anonymizedId, finalContent);
+            this.setLastOutcome(anonymizedId, null);
+
+            return {
+                stageDirections: null,
+                messageState: this.buildMessageState(),
+                modifiedMessage: finalContent,
+                systemMessage: null,
+                error: errorMessage,
+                chatState: this.chatState,
+            };
+        }
 
         if (finalContent) {
             this.addAutoPartyMembersFromText(anonymizedId, finalContent);
@@ -277,11 +331,22 @@ export class Stage extends StageBase<InitStateType, ChatStateType, MessageStateT
         const lines = Object.values(this.users).map(user => {
             const party = this.getFullParty(user.anonymizedId);
             const partyDescription = party.length > 0
-                ? party.map(member => `${member.species} (${typesOf(member).join('/') || '???'})`).join(', ')
+                ? party.map(member => this.describePartyMember(member)).join(', ')
                 : 'No moemon yet';
             return `${user.name}'s Party: ${partyDescription}`;
         });
         return '---\n```' + lines.join('\n') + '```';
+    }
+
+    // Compact roster line for one member, including the editable build info
+    // (level/item/moves) so it actually informs narration, not just the panel.
+    describePartyMember(member: PartyMember): string {
+        const details = detailsOf(member);
+        const parts = [`Lv.${details.level}`];
+        if (details.heldItem) parts.push(`Item: ${details.heldItem}`);
+        const moves = details.moves.filter(move => move.trim().length > 0);
+        if (moves.length > 0) parts.push(`Moves: ${moves.join(', ')}`);
+        return `${member.species} (${typesOf(member).join('/') || '???'}) ${parts.join(' | ')}`;
     }
 
     setStateFromMessageState(messageState: MessageStateType) {
@@ -291,7 +356,7 @@ export class Stage extends StageBase<InitStateType, ChatStateType, MessageStateT
                 const rawParty = messageState[user.anonymizedId]?.['autoParty'] ?? [];
                 userState.autoParty = (Array.isArray(rawParty) ? rawParty : [])
                     .filter((member: any) => member && typeof member.species === 'string' && getSpecies(member.species))
-                    .map((member: any) => ({species: member.species, source: 'auto'}));
+                    .map((member: any) => ({species: member.species, source: 'auto', details: DEFAULT_DETAILS}));
                 const lastOutcome = messageState[user.anonymizedId]?.['lastOutcome'] ?? null;
                 userState.lastOutcome = lastOutcome ? this.convertOutcome(lastOutcome) : null;
                 userState.lastOutcomePrompt = messageState[user.anonymizedId]?.['lastOutcomePrompt'] ?? '';
