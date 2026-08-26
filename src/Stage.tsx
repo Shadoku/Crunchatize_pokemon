@@ -81,14 +81,10 @@ export class Stage extends StageBase<InitStateType, ChatStateType, MessageStateT
     globalModifier: number;
     rosterInterval: number;
 
-    // Text the panel injected that must not be rolled on (the freeform box).
-    // Matched by content rather than a marker in the message itself: the
-    // message reaches the chat via impersonate(), which does not call
-    // beforePrompt, so a marker would never get stripped and would show up
-    // verbatim in the chat. Matching also means a flag left behind - if
-    // beforePrompt never fires - can't swallow the roll on some later,
-    // unrelated action.
-    noRollContent: string|null = null;
+    // What a panel action did, to be shown under the reply it triggered.
+    // Panel actions aren't chat messages, so there's nothing to rewrite with
+    // the dice the way beforePrompt does for typed input.
+    pendingSystemMessage: string|null = null;
 
 
     constructor(data: InitialData<InitStateType, ChatStateType, MessageStateType, ConfigType>) {
@@ -244,41 +240,55 @@ export class Stage extends StageBase<InitStateType, ChatStateType, MessageStateT
             ? inventory.map(item => sameItem(item.name, name) ? {...item, quantity: item.quantity - 1} : item)
             : inventory.filter(item => !sameItem(item.name, name));
         await this.patchChatState(anonymizedId, {inventory: updated});
-        await this.speakAsPlayer(anonymizedId, `I use the ${existing.name}.`);
+
+        // Using an item is an ordinary action, so it is classified and rolled
+        // for exactly as typed input would be - it just has to be resolved
+        // here, since nothing about it passes through beforePrompt.
+        const text = `I use the ${existing.name}.`;
+        this.addAutoPartyMembersFromText(anonymizedId, text);
+        const action = await this.resolveAction(anonymizedId, text);
+        this.setLastOutcome(anonymizedId, action.determineSuccess());
+
+        // The dice would normally be shown by rewriting the player's message;
+        // with no message to rewrite, they go under the reply instead.
+        this.pendingSystemMessage = this.getUserState(anonymizedId).lastOutcome?.getDescription() ?? null;
+        await this.nudgeWithDirections(this.buildStageDirections(anonymizedId));
     }
 
-    // Puts a message in the chat as the player, then asks a bot to reply.
-    // impersonate() only inserts the message - it never prompts anyone - so
-    // without the nudge the message just sits there and the chat stalls.
-    async speakAsPlayer(anonymizedId: string, text: string): Promise<void> {
-        await this.messenger.impersonate({
-            speaker_id: anonymizedId,
-            message: text,
-            parent_id: null,
-            is_main: true
-        });
-
-        // Deliberately nudges with no fields at all, letting Chub work out
-        // who speaks next.
-        //
-        // Naming a speaker here fails: generation dies inside Chub's nudge
-        // handler with "can't access property 'extensions'", and it does so
-        // whichever bot is named, which is the tell - a stage only ever sees
-        // anonymized IDs, and the handler resolves the one it's given against
-        // a map that isn't keyed by them. Supplying `participants` has the
-        // same problem, since those are anonymized IDs too.
-        //
-        // A published stage that nudges with only stage_directions works, so
-        // the empty form is the one known to survive this path.
-        await this.messenger.nudge({});
+    // Asks a bot to respond to something the panel did, carrying the action
+    // itself in the stage directions.
+    //
+    // Nothing is impersonated. Inserting a message as the player and then
+    // nudging is what failed - generation died inside Chub's nudge handler
+    // with "can't access property 'extensions'" no matter which bot, or no
+    // bot, was named. The one shape known to work in a published stage is a
+    // bare nudge carrying only stage_directions, so that is what this sends.
+    //
+    // The cost is that the player's line is no longer its own chat message;
+    // it reaches the narrator as a directive instead, and the panel shows
+    // what happened underneath the reply (see pendingSystemMessage).
+    async nudgeWithDirections(directions: string): Promise<void> {
+        await this.messenger.nudge({stage_directions: directions});
     }
 
     // Sends the player's text as plain dialogue/narration that's guaranteed
     // not to trigger a roll. Rolled actions go through Chub's native input
-    // instead, or through item use below.
+    // instead, or through item use above.
     async sendPartyDialogue(anonymizedId: string, text: string): Promise<void> {
-        this.noRollContent = text.trim();
-        await this.speakAsPlayer(anonymizedId, text);
+        const trimmed = text.trim();
+        if (!trimmed) return;
+
+        this.addAutoPartyMembersFromText(anonymizedId, trimmed);
+        // No dice: the text is handed over verbatim as what the player said
+        // or did, with the same no-roll instruction beforePrompt would give.
+        this.setLastOutcome(anonymizedId, null);
+        const userName = this.users[anonymizedId]?.name ?? '';
+        const directions = `\n[INST]${userName} says or does the following, which needs no dice roll: ${trimmed}\n`
+            + `${this.replaceTags(ResultDescription[Result.None], {"user": userName, "char": ''})}\n[/INST]`
+            + this.rosterNoteIfDue(anonymizedId);
+
+        this.pendingSystemMessage = `###(No Check) ${trimmed}###`;
+        await this.nudgeWithDirections(directions);
     }
 
     async load(): Promise<Partial<LoadResponse<InitStateType, ChatStateType, MessageStateType>>> {
@@ -299,6 +309,60 @@ export class Stage extends StageBase<InitStateType, ChatStateType, MessageStateT
         this.setStateFromMessageState(state);
     }
 
+    // Classifies a line of action and works out its modifiers. Shared by the
+    // normal chat path and by panel-initiated actions like using an item,
+    // which never pass through beforePrompt and so must be resolved here.
+    async resolveAction(anonymizedId: string, text: string, charName: string = ''): Promise<Action> {
+        const sequence = this.replaceTags(text, {
+            "user": this.users[anonymizedId]?.name ?? '',
+            "char": charName
+        });
+
+        // Kick both classifications off together; only the difficulty one needs awaiting first.
+        const domainPromise = this.query({sequence: sequence, candidate_labels: Object.keys(DOMAIN_MAPPING), hypothesis_template: DOMAIN_HYPOTHESIS, multi_label: true});
+
+        let difficultyRating: number = 0;
+        const difficultyResponse = await this.query({sequence: sequence, candidate_labels: Object.keys(DIFFICULTY_MAPPING), hypothesis_template: DIFFICULTY_HYPOTHESIS, multi_label: true });
+        if (difficultyResponse && difficultyResponse.labels[0]) {
+            difficultyRating = DIFFICULTY_MAPPING[difficultyResponse.labels[0]] + this.globalModifier;
+            console.log(`Difficulty modifier selected: ${difficultyRating}`);
+        }
+
+        let domain: MoemonType|null = null;
+        const domainResponse = await domainPromise;
+        if (domainResponse && domainResponse.labels && domainResponse.scores[0] > 0.1) {
+            domain = DOMAIN_MAPPING[domainResponse.labels[0]];
+            console.log(`Domain selected: ${domain}`);
+        }
+
+        if (!domain || difficultyRating >= 1000) return new Action(text, null, 0, 0, null);
+
+        const party = this.getFullParty(anonymizedId);
+        const actingMember = this.findActingMember(party, sequence);
+
+        let typeModifier = 0;
+        let actor: string|null = null;
+        if (actingMember) {
+            actor = displayNameOf(actingMember);
+            typeModifier = modifierForMultiplier(bestEffectiveness(typesOf(actingMember), domain));
+        } else if (party.length > 0) {
+            // No specific actor named; the party supports ambiently, at half strength.
+            const bestMatch = Math.max(...party.map(member => bestEffectiveness(typesOf(member), domain as MoemonType)));
+            typeModifier = Math.round(modifierForMultiplier(bestMatch) / 2);
+        }
+
+        return new Action(text, domain, difficultyRating, typeModifier, actor);
+    }
+
+    // The [INST] block handed to the LLM for a resolved action.
+    buildStageDirections(anonymizedId: string, charName: string = ''): string {
+        const prompt = this.replaceTags(this.getUserState(anonymizedId).lastOutcomePrompt, {
+            "user": this.users[anonymizedId]?.name ?? '',
+            "char": charName
+        });
+        return `\n[INST]${prompt}\n[/INST]${this.rosterNoteIfDue(anonymizedId)}`;
+    }
+
     async beforePrompt(userMessage: Message): Promise<Partial<StageResponse<ChatStateType, MessageStateType>>> {
         const {
             anonymizedId,
@@ -310,66 +374,10 @@ export class Stage extends StageBase<InitStateType, ChatStateType, MessageStateT
         let takenAction: Action|null = null;
         let finalContent: string|undefined = content;
 
-        // Sent via the panel's freeform box: skip classification and rolling
-        // entirely and pass the text straight through.
-        if (finalContent && this.noRollContent !== null && finalContent.trim() === this.noRollContent) {
-            this.noRollContent = null;
-            this.addAutoPartyMembersFromText(anonymizedId, finalContent);
-            this.setLastOutcome(anonymizedId, null);
-            const rosterNote = this.rosterNoteIfDue(anonymizedId);
-
-            return {
-                stageDirections: rosterNote || null,
-                messageState: this.buildMessageState(),
-                modifiedMessage: finalContent,
-                systemMessage: null,
-                error: errorMessage,
-                chatState: this.chatState,
-            };
-        }
-
         if (finalContent) {
             this.addAutoPartyMembersFromText(anonymizedId, finalContent);
-
-            const sequence = this.replaceTags(content,
-                {"user": anonymizedId ? this.users[anonymizedId].name : '', "char": promptForId ? this.characters[promptForId].name : ''});
-
-            // Kick both classifications off together; only the difficulty one needs awaiting first.
-            const domainPromise = this.query({sequence: sequence, candidate_labels: Object.keys(DOMAIN_MAPPING), hypothesis_template: DOMAIN_HYPOTHESIS, multi_label: true});
-
-            let difficultyRating: number = 0;
-            const difficultyResponse = await this.query({sequence: sequence, candidate_labels: Object.keys(DIFFICULTY_MAPPING), hypothesis_template: DIFFICULTY_HYPOTHESIS, multi_label: true });
-            console.log(`Difficulty modifier selected: ${DIFFICULTY_MAPPING[difficultyResponse.labels[0]] + this.globalModifier}`);
-            if (difficultyResponse && difficultyResponse.labels[0]) {
-                difficultyRating = DIFFICULTY_MAPPING[difficultyResponse.labels[0]] + this.globalModifier;
-            }
-
-            let domain: MoemonType|null = null;
-            const domainResponse = await domainPromise;
-            if (domainResponse && domainResponse.labels && domainResponse.scores[0] > 0.1) {
-                domain = DOMAIN_MAPPING[domainResponse.labels[0]];
-                console.log(`Domain selected: ${domain}`);
-            }
-
-            if (domain && difficultyRating < 1000) {
-                const party = this.getFullParty(anonymizedId);
-                const actingMember = this.findActingMember(party, sequence);
-
-                let typeModifier = 0;
-                let actor: string|null = null;
-                if (actingMember) {
-                    actor = displayNameOf(actingMember);
-                    typeModifier = modifierForMultiplier(bestEffectiveness(typesOf(actingMember), domain));
-                } else if (party.length > 0) {
-                    // No specific actor named; the party supports ambiently, at half strength.
-                    const bestMatch = Math.max(...party.map(member => bestEffectiveness(typesOf(member), domain as MoemonType)));
-                    typeModifier = Math.round(modifierForMultiplier(bestMatch) / 2);
-                }
-
-                takenAction = new Action(finalContent, domain, difficultyRating, typeModifier, actor);
-            } else {
-                takenAction = new Action(finalContent, null, 0, 0, null);
-            }
+            takenAction = await this.resolveAction(anonymizedId, content,
+                promptForId ? this.characters[promptForId]?.name ?? '' : '');
         }
 
         if (takenAction) {
@@ -378,10 +386,8 @@ export class Stage extends StageBase<InitStateType, ChatStateType, MessageStateT
         }
 
         return {
-            stageDirections: `\n[INST]${this.replaceTags(this.getUserState(anonymizedId).lastOutcomePrompt,{
-                "user": this.users[anonymizedId].name,
-                "char": promptForId ? this.characters[promptForId].name : ''
-            })}\n[/INST]${this.rosterNoteIfDue(anonymizedId)}`,
+            stageDirections: this.buildStageDirections(anonymizedId,
+                promptForId ? this.characters[promptForId]?.name ?? '' : ''),
             messageState: this.buildMessageState(),
             modifiedMessage: finalContent,
             systemMessage: null,
@@ -399,12 +405,17 @@ export class Stage extends StageBase<InitStateType, ChatStateType, MessageStateT
             this.getUserState(user.anonymizedId).lastOutcomePrompt = '';
         }
 
+        // A panel action has no message of its own to carry its dice, so the
+        // roll is shown here, above the roster, on the reply it produced.
+        const panelResult = this.pendingSystemMessage;
+        this.pendingSystemMessage = null;
+
         return {
             stageDirections: null,
             messageState: this.buildMessageState(),
             modifiedMessage: message.split(/---|\*\*\*|```|system:/i)[0].trim(),
             error: null,
-            systemMessage: this.buildPartySystemMessage(),
+            systemMessage: [panelResult, this.buildPartySystemMessage()].filter(Boolean).join('\n'),
             chatState: this.chatState
         };
     }
