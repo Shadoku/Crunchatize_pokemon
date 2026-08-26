@@ -89,7 +89,7 @@ export function defaultDetailsFor(species: string, level: number = DEFAULT_DETAI
         const moves = signature.length < 4
             ? signature
             : fillWithBasics(signature, primary.moves, level);
-        return {level, moves: padToFour(moves), heldItem: curated.item ?? primary.item};
+        return {nickname: '', level, moves: padToFour(moves), heldItem: curated.item ?? primary.item};
     }
 
     // Dual types split their slots so both halves of the matchup show up.
@@ -104,7 +104,7 @@ export function defaultDetailsFor(species: string, level: number = DEFAULT_DETAI
             windowForLevel(secondary.moves, 4, level, jitter))
         : windowForLevel(primary.moves, 4, level, jitter);
 
-    return {level, moves: padToFour(moves), heldItem: primary.item};
+    return {nickname: '', level, moves: padToFour(moves), heldItem: primary.item};
 }
 
 // Signature moves come in as the member levels; any slot not yet earned is

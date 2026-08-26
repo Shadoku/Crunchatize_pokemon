@@ -206,10 +206,26 @@ $type-colors: (
   border: 1px dashed $line;
 }
 
+.crunchatize-party-names {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  line-height: 1.15;
+}
+
 .crunchatize-party-name {
   font-weight: 650;
   font-size: 1rem;
   color: $ink;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+// Only shown when a nickname has replaced the species as the headline.
+.crunchatize-party-species {
+  font-size: 0.72rem;
+  color: $ink-dim;
 }
 
 .crunchatize-party-level {
@@ -437,13 +453,73 @@ $type-colors: (
   &:disabled { cursor: default; opacity: 0.45; }
 }
 
-.crunchatize-party-editor {
+// Opened details: the edit form, with the portrait growing in beside it.
+.crunchatize-party-details {
   display: flex;
-  flex-direction: column;
-  gap: 0.4rem;
+  align-items: stretch;
+  gap: 0.6rem;
   padding: 0.6rem;
   background-color: $surface-sunken;
   border-top: 1px solid $line;
+  animation: crunchatize-details-in 260ms cubic-bezier(0.2, 0.7, 0.3, 1) both;
+}
+
+@keyframes crunchatize-details-in {
+  from { opacity: 0; transform: translateY(-6px); }
+  to   { opacity: 1; transform: none; }
+}
+
+.crunchatize-party-editor {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+// Grows out of nothing into a tall crop alongside the form. Width is what's
+// animated, so the form reflows into the space as it opens rather than the
+// portrait overlapping it.
+.crunchatize-party-portrait {
+  flex-shrink: 0;
+  width: 7.5rem;
+  overflow: hidden;
+  padding: 0;
+  cursor: zoom-in;
+  background: none;
+  border: 1px solid $line;
+  border-radius: 0.4rem;
+  animation: crunchatize-portrait-in 320ms cubic-bezier(0.2, 0.7, 0.3, 1) both;
+
+  img {
+    display: block;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+
+  &:hover {
+    border-color: $ink-dim;
+  }
+}
+
+@keyframes crunchatize-portrait-in {
+  from { width: 0; opacity: 0; }
+  to   { width: 7.5rem; opacity: 1; }
+}
+
+// The portrait is the first thing to go when there isn't room for it.
+@media (max-width: 330px) {
+  .crunchatize-party-portrait { display: none; }
+}
+
+// Honour a system-level request for less movement: the layout still changes,
+// it just arrives without the travel.
+@media (prefers-reduced-motion: reduce) {
+  .crunchatize-party-details,
+  .crunchatize-party-portrait {
+    animation-duration: 1ms;
+  }
 }
 
 .crunchatize-party-editor-field {

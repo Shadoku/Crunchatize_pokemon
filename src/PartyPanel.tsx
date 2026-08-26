@@ -2,7 +2,7 @@ import {ReactElement, useEffect, useState} from "react";
 import type {Stage} from "./Stage";
 import {speciesNames, getSpecies, speciesImageUrl} from "./Lore";
 import {anchorFor, onAnchorsLoaded} from "./Portrait";
-import {PartyMember, PartyMemberDetails, DEFAULT_DETAILS, detailsOf} from "./Party";
+import {PartyMember, PartyMemberDetails, DEFAULT_DETAILS, detailsOf, displayNameOf} from "./Party";
 import {itemCategories} from "./Inventory";
 
 function clampLevel(value: string): number {
@@ -363,7 +363,10 @@ function PartyMemberRow({member, expanded, onToggle, onRemove, onSaveDetails, on
                         {member.species.charAt(0)}
                     </span>
                 )}
-                <span className="crunchatize-party-name">{member.species}</span>
+                <span className="crunchatize-party-names">
+                    <span className="crunchatize-party-name">{displayNameOf(member)}</span>
+                    {details.nickname && <span className="crunchatize-party-species">{member.species}</span>}
+                </span>
                 <span className="crunchatize-party-level">Lv.{details.level}</span>
                 <span className="crunchatize-party-types">
                     {(info?.types ?? []).map(type => (
@@ -381,7 +384,30 @@ function PartyMemberRow({member, expanded, onToggle, onRemove, onSaveDetails, on
                     }}
                 >×</button>
             </div>
-            {expanded && <PartyMemberEditor details={details} onSave={onSaveDetails} onCancel={onToggle} />}
+            {expanded && (
+                // Mounted fresh on expand, so the CSS entry animations below
+                // run each time the row is opened.
+                <div className="crunchatize-party-details">
+                    <PartyMemberEditor details={details} onSave={onSaveDetails} onCancel={onToggle} />
+                    {imageOk && (
+                        <button
+                            type="button"
+                            className="crunchatize-party-portrait"
+                            title={`View ${displayNameOf(member)}'s portrait`}
+                            onClick={(event) => {
+                                event.stopPropagation();
+                                onViewPortrait(member.species);
+                            }}
+                        >
+                            <img
+                                src={speciesImageUrl(member.species)}
+                                alt=""
+                                style={{objectPosition: `${anchorFor(member.species) * 100}% ${anchorFor(member.species) * 100}%`}}
+                            />
+                        </button>
+                    )}
+                </div>
+            )}
         </li>
     );
 }
@@ -391,12 +417,22 @@ function PartyMemberEditor({details, onSave, onCancel}: {
     onSave: (details: PartyMemberDetails) => void;
     onCancel: () => void;
 }): ReactElement {
+    const [nickname, setNickname] = useState(details.nickname);
     const [level, setLevel] = useState(details.level);
     const [moves, setMoves] = useState(details.moves);
     const [heldItem, setHeldItem] = useState(details.heldItem);
 
     return (
         <div className="crunchatize-party-editor">
+            <label className="crunchatize-party-editor-field">
+                <span className="crunchatize-party-editor-label">Nickname</span>
+                <input
+                    type="text"
+                    placeholder="none"
+                    value={nickname}
+                    onChange={(event) => setNickname(event.target.value)}
+                />
+            </label>
             <label className="crunchatize-party-editor-field">
                 <span className="crunchatize-party-editor-label">Level</span>
                 <input
@@ -426,7 +462,7 @@ function PartyMemberEditor({details, onSave, onCancel}: {
                 </label>
             ))}
             <div className="crunchatize-party-editor-actions">
-                <button type="button" onClick={() => onSave({level, moves, heldItem})}>Save</button>
+                <button type="button" onClick={() => onSave({nickname: nickname.trim(), level, moves, heldItem})}>Save</button>
                 <button type="button" onClick={onCancel}>Cancel</button>
             </div>
         </div>

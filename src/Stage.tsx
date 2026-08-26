@@ -4,8 +4,8 @@ import {LoadResponse} from "@chub-ai/stages-ts/dist/types/load";
 import {Action} from "./Action";
 import {Outcome, Result, ResultDescription} from "./Outcome";
 import {MoemonType, TypeDomainDescription, bestEffectiveness, modifierForMultiplier} from "./MoemonType";
-import {getSpecies, findSpeciesMentions} from "./Lore";
-import {PartyMember, PartyMemberDetails, DEFAULT_DETAILS, detailsOf, typesOf} from "./Party";
+import {getSpecies, findSpeciesMentions, escapeRegex} from "./Lore";
+import {PartyMember, PartyMemberDetails, DEFAULT_DETAILS, detailsOf, displayNameOf, labelFor, typesOf} from "./Party";
 import {defaultDetailsFor} from "./Moveset";
 import {InventoryItem, parseInventory, sameItem} from "./Inventory";
 import {PartyPanel} from "./PartyPanel";
@@ -341,15 +341,13 @@ export class Stage extends StageBase<InitStateType, ChatStateType, MessageStateT
 
             if (domain && difficultyRating < 1000) {
                 const party = this.getFullParty(anonymizedId);
-                const mentionedSpecies = findSpeciesMentions(sequence);
-                const actingSpecies = mentionedSpecies.find(name => party.some(member => member.species.toLowerCase() === name.toLowerCase()));
+                const actingMember = this.findActingMember(party, sequence);
 
                 let typeModifier = 0;
                 let actor: string|null = null;
-                if (actingSpecies) {
-                    const member = party.find(member => member.species.toLowerCase() === actingSpecies.toLowerCase())!;
-                    actor = member.species;
-                    typeModifier = modifierForMultiplier(bestEffectiveness(typesOf(member), domain));
+                if (actingMember) {
+                    actor = displayNameOf(actingMember);
+                    typeModifier = modifierForMultiplier(bestEffectiveness(typesOf(actingMember), domain));
                 } else if (party.length > 0) {
                     // No specific actor named; the party supports ambiently, at half strength.
                     const bestMatch = Math.max(...party.map(member => bestEffectiveness(typesOf(member), domain as MoemonType)));
@@ -408,13 +406,28 @@ export class Stage extends StageBase<InitStateType, ChatStateType, MessageStateT
         for (const user of Object.values(this.users)) {
             const party = this.getFullParty(user.anonymizedId);
             lines.push(`${user.name}'s Party: ${party.length > 0
-                ? party.map(member => `${member.species} (${typesOf(member).join('/') || '???'}) Lv.${detailsOf(member).level}`).join(', ')
+                ? party.map(member => `${labelFor(member, [typesOf(member).join('/') || '???'])} Lv.${detailsOf(member).level}`).join(', ')
                 : 'No moemon yet'}`);
 
             const bag = this.describeBag(user.anonymizedId);
             if (bag) lines.push(`${user.name}'s Bag: ${bag}`);
         }
         return '---\n```' + lines.join('\n') + '```';
+    }
+
+    // Which party member the player named as taking the action, if any. A
+    // nickname counts as naming them - a player who calls her Pikachu "Sparky"
+    // shouldn't have to write "Pikachu" to get the type bonus - and is checked
+    // first, since it's the more specific reference.
+    findActingMember(party: PartyMember[], text: string): PartyMember|undefined {
+        const byNickname = party.find(member => {
+            const nickname = detailsOf(member).nickname;
+            return nickname.length > 0 && new RegExp(`\\b${escapeRegex(nickname)}(?![A-Za-z0-9])`, 'i').test(text);
+        });
+        if (byNickname) return byNickname;
+
+        const mentioned = findSpeciesMentions(text);
+        return party.find(member => mentioned.some(name => name.toLowerCase() === member.species.toLowerCase()));
     }
 
     describeBag(anonymizedId: string): string {
@@ -435,8 +448,12 @@ export class Stage extends StageBase<InitStateType, ChatStateType, MessageStateT
         const roster = party.length > 0
             ? party.map(member => {
                 const details = detailsOf(member);
-                const held = details.heldItem ? `, holding ${details.heldItem}` : '';
-                return `${member.species} (${typesOf(member).join('/') || '???'}-type, Lv.${details.level}${held})`;
+                const facts = [`${typesOf(member).join('/') || '???'}-type`, `Lv.${details.level}`];
+                if (details.heldItem) facts.push(`holding ${details.heldItem}`);
+                // Nicknamed members read as "Sparky" (Pikachu, Electric-type,
+                // ...) so the narrator can use the nickname and still knows
+                // what she is.
+                return labelFor(member, facts);
             }).join('; ')
             : 'no moemon';
 

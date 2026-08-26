@@ -23,7 +23,7 @@ function parseTypes(content: string): MoemonType[] {
         .filter((token): token is MoemonType => (Object.values(MoemonType) as string[]).includes(token));
 }
 
-function escapeRegex(value: string): string {
+export function escapeRegex(value: string): string {
     return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
