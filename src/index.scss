@@ -529,7 +529,7 @@ $type-colors: (
   font-size: 0.82rem;
   color: $ink-dim;
 
-  input {
+  input, select {
     flex: 1;
     min-width: 0;
     font: inherit;
@@ -780,7 +780,7 @@ $type-colors: (
   font-size: 0.82rem;
   color: $ink-dim;
 
-  input {
+  input, select {
     flex: 1;
     min-width: 0;
     font: inherit;
@@ -825,3 +825,282 @@ $type-colors: (
   }
 }
 
+
+// The shared scene note, above the per-player blocks.
+.crunchatize-scene {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  padding-bottom: 0.6rem;
+  border-bottom: 1px solid $line;
+}
+
+.crunchatize-scene-title {
+  font-size: 0.8rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: $ink-dim;
+}
+
+.crunchatize-scene-row {
+  display: flex;
+  gap: 0.35rem;
+
+  input {
+    flex: 1;
+    min-width: 0;
+    font: inherit;
+    font-size: 0.88rem;
+    color: $ink;
+    background-color: $surface-sunken;
+    border: 1px solid $line;
+    border-radius: 0.35rem;
+    padding: 0.3rem 0.45rem;
+
+    &::placeholder { color: rgba(167, 174, 194, 0.7); }
+    &:focus { outline: none; border-color: $ink-dim; }
+  }
+
+  button {
+    flex-shrink: 0;
+    font: inherit;
+    font-size: 0.85rem;
+    font-weight: 600;
+    cursor: pointer;
+    color: $ink;
+    background-color: $surface-raised;
+    border: 1px solid $line;
+    border-radius: 0.35rem;
+    padding: 0.3rem 0.7rem;
+
+    &:not(:disabled):hover { border-color: $ink-dim; }
+    &:disabled { cursor: default; opacity: 0.45; }
+  }
+}
+
+// Condition badge on a party row. Only drawn when something is wrong, so
+// there's no "OK" state to style - clicking it clears back to OK.
+.crunchatize-condition {
+  flex-shrink: 0;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  cursor: pointer;
+  border-radius: 0.25rem;
+  padding: 0.1rem 0.3rem;
+
+  &:focus-visible { outline: 1px solid $ink-dim; }
+}
+
+.crunchatize-condition--hurt {
+  color: #e0836a;
+  background-color: rgba(224, 131, 106, 0.15);
+}
+
+.crunchatize-condition--fainted {
+  color: #e0525a;
+  background-color: rgba(224, 82, 90, 0.18);
+}
+
+// Threads and characters reuse the bag's list/add-row shapes; only what
+// differs from it is set here.
+.crunchatize-threads,
+.crunchatize-npcs {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  margin-top: 0.35rem;
+  padding-top: 0.6rem;
+  border-top: 1px solid $line;
+}
+
+.crunchatize-thread-toggle {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 0.45rem;
+  font: inherit;
+  font-size: 0.88rem;
+  text-align: left;
+  cursor: pointer;
+  color: $ink;
+  background-color: $surface-raised;
+  border: 1px solid $line;
+  border-radius: 0.4rem;
+  padding: 0.35rem 0.55rem;
+
+  &:not(:disabled):hover { border-color: $accent-say; }
+  &:disabled { cursor: default; opacity: 0.5; }
+
+  &.is-done {
+    color: $ink-dim;
+    .crunchatize-thread-text { text-decoration: line-through; }
+    .crunchatize-thread-check { color: $accent-say; }
+  }
+}
+
+.crunchatize-thread-check {
+  flex-shrink: 0;
+  font-size: 0.8rem;
+  color: $ink-dim;
+}
+
+.crunchatize-thread-text {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.crunchatize-npc-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.crunchatize-npc {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  background-color: $surface-raised;
+  border: 1px solid $line;
+  border-radius: 0.4rem;
+  padding: 0.4rem 0.5rem;
+}
+
+.crunchatize-npc-row {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.crunchatize-npc-name {
+  flex: 1;
+  min-width: 0;
+  font-size: 0.9rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.crunchatize-npc-affinity {
+  flex-shrink: 0;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.crunchatize-npc-affinity--warm    { color: $accent-say; }
+.crunchatize-npc-affinity--cold    { color: #e0836a; }
+.crunchatize-npc-affinity--neutral { color: $ink-dim; }
+
+.crunchatize-npc-nudge {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  line-height: 1;
+
+  button {
+    font: inherit;
+    font-size: 0.55rem;
+    cursor: pointer;
+    color: $ink-dim;
+    background: none;
+    border: none;
+    padding: 0.05rem 0.2rem;
+
+    &:not(:disabled):hover { color: $ink; }
+    &:disabled { cursor: default; opacity: 0.3; }
+  }
+}
+
+.crunchatize-npc-note {
+  font: inherit;
+  font-size: 0.8rem;
+  color: $ink-dim;
+  background-color: $surface-sunken;
+  border: 1px solid transparent;
+  border-radius: 0.3rem;
+  padding: 0.2rem 0.35rem;
+
+  &::placeholder { color: rgba(167, 174, 194, 0.55); }
+  &:focus { outline: none; color: $ink; border-color: $line; }
+}
+
+// Import/export, folded away until asked for - it's a maintenance tool, not
+// part of the turn-to-turn loop.
+.crunchatize-save {
+  margin-top: 0.35rem;
+  padding-top: 0.6rem;
+  border-top: 1px solid $line;
+}
+
+.crunchatize-save-disclosure {
+  font: inherit;
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  cursor: pointer;
+  color: $ink-dim;
+  background: none;
+  border: none;
+  padding: 0;
+
+  &:hover { color: $ink; }
+}
+
+.crunchatize-save-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  margin-top: 0.45rem;
+}
+
+.crunchatize-save-actions {
+  display: flex;
+  gap: 0.35rem;
+
+  button {
+    flex: 1;
+    font: inherit;
+    font-size: 0.85rem;
+    font-weight: 600;
+    cursor: pointer;
+    color: $ink;
+    background-color: $surface-raised;
+    border: 1px solid $line;
+    border-radius: 0.35rem;
+    padding: 0.3rem 0.7rem;
+
+    &:not(:disabled):hover { border-color: $ink-dim; }
+    &:disabled { cursor: default; opacity: 0.45; }
+  }
+}
+
+.crunchatize-save-text {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.72rem;
+  line-height: 1.4;
+  resize: vertical;
+  color: $ink;
+  background-color: $surface-sunken;
+  border: 1px solid $line;
+  border-radius: 0.35rem;
+  padding: 0.35rem 0.45rem;
+
+  &::placeholder { color: rgba(167, 174, 194, 0.7); }
+  &:focus { outline: none; border-color: $ink-dim; }
+}
+
+.crunchatize-save-status {
+  font-size: 0.78rem;
+  color: $accent-say;
+
+  &.is-error { color: #e0836a; }
+}

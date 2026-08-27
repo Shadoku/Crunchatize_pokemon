@@ -2,8 +2,9 @@ import {ReactElement, useEffect, useState} from "react";
 import type {Stage} from "./Stage";
 import {speciesNames, getSpecies, speciesImageUrl} from "./Lore";
 import {anchorFor, onAnchorsLoaded} from "./Portrait";
-import {PartyMember, PartyMemberDetails, DEFAULT_DETAILS, detailsOf, displayNameOf} from "./Party";
+import {PartyMember, PartyMemberDetails, DEFAULT_DETAILS, detailsOf, displayNameOf, Condition} from "./Party";
 import {itemCategories} from "./Inventory";
+import {NpcEntry, describeAffinity, AFFINITY_MIN, AFFINITY_MAX} from "./Npc";
 import {Outcome, ResultClass} from "./Outcome";
 
 function clampLevel(value: string): number {
@@ -59,6 +60,9 @@ export function PartyPanel({stage}: {stage: Stage}): ReactElement {
 
     return (
         <div className="crunchatize-party-panel">
+            {/* Shared by everyone in the chat, so it sits above the per-player
+                blocks rather than being repeated inside each one. */}
+            <EnvironmentField stage={stage} refresh={refresh} />
             {users.map(user => (
                 <PartyBlock
                     key={user.anonymizedId}
@@ -70,6 +74,54 @@ export function PartyPanel({stage}: {stage: Stage}): ReactElement {
                 />
             ))}
             {viewing && <PortraitViewer species={viewing} onClose={() => setViewing(null)} />}
+        </div>
+    );
+}
+
+// Where and when the scene is happening. Free text, edited by any player,
+// and handed to the narrator alongside the roster so a long stretch without
+// scene-setting dialogue doesn't let the story drift somewhere else.
+function EnvironmentField({stage, refresh}: {stage: Stage; refresh: () => void}): ReactElement {
+    const saved = stage.getEnvironment();
+    const [draft, setDraft] = useState(saved);
+    const [busy, setBusy] = useState(false);
+
+    // Another player (or an import) can change this underneath an untouched
+    // field; adopt that rather than leaving a stale draft on screen.
+    useEffect(() => setDraft(saved), [saved]);
+
+    const dirty = draft.trim() !== saved;
+
+    async function save() {
+        if (busy || !dirty) return;
+        setBusy(true);
+        try {
+            await stage.setEnvironment(draft);
+        } finally {
+            setBusy(false);
+            refresh();
+        }
+    }
+
+    return (
+        <div className="crunchatize-scene">
+            <div className="crunchatize-scene-title">Scene</div>
+            <div className="crunchatize-scene-row">
+                <input
+                    type="text"
+                    placeholder="where and when, e.g. Viridian Forest, dusk, raining"
+                    value={draft}
+                    disabled={busy}
+                    onChange={(event) => setDraft(event.target.value)}
+                    onKeyDown={(event) => {
+                        if (event.key === 'Enter') {
+                            event.preventDefault();
+                            save();
+                        }
+                    }}
+                />
+                <button type="button" disabled={busy || !dirty} onClick={save}>Set</button>
+            </div>
         </div>
     );
 }
@@ -116,11 +168,16 @@ function PartyBlock({stage, anonymizedId, name, refresh, onViewPortrait}: {
                     <PartyMemberRow
                         key={member.species}
                         member={member}
+                        condition={stage.getCondition(anonymizedId, member.species)}
                         onViewPortrait={onViewPortrait}
                         expanded={expandedSpecies === member.species}
                         onToggle={() => setExpandedSpecies(expandedSpecies === member.species ? null : member.species)}
                         onRemove={async () => {
                             await stage.removePartyMember(anonymizedId, member.species);
+                            refresh();
+                        }}
+                        onSetCondition={(condition) => {
+                            stage.setCondition(anonymizedId, member.species, condition);
                             refresh();
                         }}
                         onSaveDetails={async (details) => {
@@ -161,8 +218,11 @@ function PartyBlock({stage, anonymizedId, name, refresh, onViewPortrait}: {
                 </label>
             </div>
             <InventoryPanel stage={stage} anonymizedId={anonymizedId} refresh={refresh} />
+            <QuestPanel stage={stage} anonymizedId={anonymizedId} refresh={refresh} />
+            <NpcPanel stage={stage} anonymizedId={anonymizedId} refresh={refresh} />
             <RollToggle stage={stage} anonymizedId={anonymizedId} refresh={refresh} />
             <LastRoll outcome={stage.getUserState(anonymizedId).lastOutcome} />
+            <SavePanel stage={stage} anonymizedId={anonymizedId} refresh={refresh} />
         </div>
     );
 }
@@ -308,6 +368,286 @@ function InventoryPanel({stage, anonymizedId, refresh}: {
     );
 }
 
+// Open plot threads. Checked off rather than deleted when they resolve, so
+// the player keeps the history; only unchecked ones are sent to the narrator.
+function QuestPanel({stage, anonymizedId, refresh}: {
+    stage: Stage;
+    anonymizedId: string;
+    refresh: () => void;
+}): ReactElement {
+    const [text, setText] = useState('');
+    const [busy, setBusy] = useState(false);
+
+    const quests = stage.getQuests(anonymizedId);
+
+    async function add() {
+        if (!text.trim() || busy) return;
+        setBusy(true);
+        try {
+            await stage.addQuest(anonymizedId, text);
+            setText('');
+        } finally {
+            setBusy(false);
+            refresh();
+        }
+    }
+
+    return (
+        <div className="crunchatize-threads">
+            <div className="crunchatize-bag-title">Threads</div>
+            {quests.length === 0 && <div className="crunchatize-party-empty">Nothing open.</div>}
+            <ul className="crunchatize-bag-list">
+                {quests.map(quest => (
+                    <li key={quest.id} className="crunchatize-bag-item">
+                        <button
+                            type="button"
+                            className={`crunchatize-thread-toggle${quest.done ? ' is-done' : ''}`}
+                            disabled={busy}
+                            title={quest.done ? 'Reopen this thread' : 'Mark this thread resolved'}
+                            aria-pressed={quest.done}
+                            onClick={async () => {
+                                await stage.toggleQuest(anonymizedId, quest.id);
+                                refresh();
+                            }}
+                        >
+                            <span className="crunchatize-thread-check" aria-hidden="true">{quest.done ? '✓' : '○'}</span>
+                            <span className="crunchatize-thread-text">{quest.text}</span>
+                        </button>
+                        <button
+                            type="button"
+                            className="crunchatize-party-remove"
+                            aria-label={`Remove thread: ${quest.text}`}
+                            disabled={busy}
+                            onClick={async () => {
+                                await stage.removeQuest(anonymizedId, quest.id);
+                                refresh();
+                            }}
+                        >×</button>
+                    </li>
+                ))}
+            </ul>
+            <div className="crunchatize-bag-add">
+                <input
+                    className="crunchatize-bag-name-input"
+                    type="text"
+                    placeholder="track a thread..."
+                    value={text}
+                    disabled={busy}
+                    onChange={(event) => setText(event.target.value)}
+                    onKeyDown={(event) => {
+                        if (event.key === 'Enter') {
+                            event.preventDefault();
+                            add();
+                        }
+                    }}
+                />
+                <button
+                    type="button"
+                    className="crunchatize-bag-add-button"
+                    disabled={busy || !text.trim()}
+                    onClick={add}
+                >Add</button>
+            </div>
+        </div>
+    );
+}
+
+// Recurring characters, and how the player stands with them. Affinity moves
+// on its own as checks involving a name land well or badly; the arrows are
+// here for when the story says otherwise.
+function NpcPanel({stage, anonymizedId, refresh}: {
+    stage: Stage;
+    anonymizedId: string;
+    refresh: () => void;
+}): ReactElement {
+    const [name, setName] = useState('');
+    const [busy, setBusy] = useState(false);
+
+    const npcs = stage.getNpcs(anonymizedId);
+
+    async function add() {
+        if (!name.trim() || busy) return;
+        setBusy(true);
+        try {
+            await stage.addNpc(anonymizedId, name);
+            setName('');
+        } finally {
+            setBusy(false);
+            refresh();
+        }
+    }
+
+    async function nudge(npc: NpcEntry, delta: number) {
+        if (busy) return;
+        setBusy(true);
+        try {
+            await stage.updateNpc(anonymizedId, npc.name, {affinity: npc.affinity + delta});
+        } finally {
+            setBusy(false);
+            refresh();
+        }
+    }
+
+    return (
+        <div className="crunchatize-npcs">
+            <div className="crunchatize-bag-title">Characters</div>
+            {npcs.length === 0 && <div className="crunchatize-party-empty">Nobody tracked.</div>}
+            <ul className="crunchatize-npc-list">
+                {npcs.map(npc => (
+                    <li key={npc.name} className="crunchatize-npc">
+                        <div className="crunchatize-npc-row">
+                            <span className="crunchatize-npc-name">{npc.name}</span>
+                            <span
+                                className={`crunchatize-npc-affinity crunchatize-npc-affinity--${affinityTone(npc.affinity)}`}
+                                title={`${npc.name} is ${describeAffinity(npc.affinity)}`}
+                            >{describeAffinity(npc.affinity)}</span>
+                            <span className="crunchatize-npc-nudge">
+                                <button
+                                    type="button"
+                                    disabled={busy || npc.affinity >= AFFINITY_MAX}
+                                    aria-label={`Warm ${npc.name} toward you`}
+                                    onClick={() => nudge(npc, 1)}
+                                >▲</button>
+                                <button
+                                    type="button"
+                                    disabled={busy || npc.affinity <= AFFINITY_MIN}
+                                    aria-label={`Cool ${npc.name} toward you`}
+                                    onClick={() => nudge(npc, -1)}
+                                >▼</button>
+                            </span>
+                            <button
+                                type="button"
+                                className="crunchatize-party-remove"
+                                aria-label={`Remove ${npc.name}`}
+                                disabled={busy}
+                                onClick={async () => {
+                                    await stage.removeNpc(anonymizedId, npc.name);
+                                    refresh();
+                                }}
+                            >×</button>
+                        </div>
+                        <input
+                            className="crunchatize-npc-note"
+                            type="text"
+                            placeholder="who are they?"
+                            defaultValue={npc.note}
+                            disabled={busy}
+                            // Committed on blur rather than per keystroke:
+                            // every save round-trips through the messenger.
+                            onBlur={async (event) => {
+                                if (event.target.value.trim() === npc.note) return;
+                                await stage.updateNpc(anonymizedId, npc.name, {note: event.target.value});
+                                refresh();
+                            }}
+                        />
+                    </li>
+                ))}
+            </ul>
+            <div className="crunchatize-bag-add">
+                <input
+                    className="crunchatize-bag-name-input"
+                    type="text"
+                    placeholder="track a character..."
+                    value={name}
+                    disabled={busy}
+                    onChange={(event) => setName(event.target.value)}
+                    onKeyDown={(event) => {
+                        if (event.key === 'Enter') {
+                            event.preventDefault();
+                            add();
+                        }
+                    }}
+                />
+                <button
+                    type="button"
+                    className="crunchatize-bag-add-button"
+                    disabled={busy || !name.trim()}
+                    onClick={add}
+                >Add</button>
+            </div>
+        </div>
+    );
+}
+
+// Which way an affinity leans, for coloring. The description carries the
+// detail; this is just the sign.
+function affinityTone(affinity: number): string {
+    if (affinity > 0) return 'warm';
+    if (affinity < 0) return 'cold';
+    return 'neutral';
+}
+
+// Carries a roster, bag, threads, characters and scene between chats. The
+// stage can't offer a file download from inside its frame, so the bundle is
+// moved as text - copied out, pasted back in - the same route the bag
+// already uses to get an item name into the chat box.
+function SavePanel({stage, anonymizedId, refresh}: {
+    stage: Stage;
+    anonymizedId: string;
+    refresh: () => void;
+}): ReactElement {
+    const [open, setOpen] = useState(false);
+    const [draft, setDraft] = useState('');
+    const [status, setStatus] = useState<{ok: boolean; message: string} | null>(null);
+    const [busy, setBusy] = useState(false);
+
+    async function exportSave() {
+        const bundle = stage.exportSave(anonymizedId);
+        setDraft(bundle);
+        const copied = await copyToClipboard(bundle);
+        setStatus({
+            ok: true,
+            message: copied ? 'Copied - paste it somewhere safe.' : 'Select the text below and copy it.'
+        });
+    }
+
+    async function importSave() {
+        if (busy || !draft.trim()) return;
+        setBusy(true);
+        try {
+            const result = await stage.importSave(anonymizedId, draft);
+            setStatus(result.success
+                ? {ok: true, message: 'Loaded.'}
+                : {ok: false, message: result.error ?? 'Could not read that bundle.'});
+        } finally {
+            setBusy(false);
+            refresh();
+        }
+    }
+
+    return (
+        <div className="crunchatize-save">
+            <button
+                type="button"
+                className="crunchatize-save-disclosure"
+                aria-expanded={open}
+                onClick={() => setOpen(!open)}
+            >{open ? '▾' : '▸'} Save data</button>
+            {open && (
+                <div className="crunchatize-save-body">
+                    <div className="crunchatize-save-actions">
+                        <button type="button" disabled={busy} onClick={exportSave}>Export</button>
+                        <button type="button" disabled={busy || !draft.trim()} onClick={importSave}>Import</button>
+                    </div>
+                    <textarea
+                        className="crunchatize-save-text"
+                        rows={6}
+                        spellCheck={false}
+                        placeholder="Export to copy this chat's party, bag, threads and characters - or paste a bundle here and Import to load it."
+                        value={draft}
+                        disabled={busy}
+                        onChange={(event) => setDraft(event.target.value)}
+                        onFocus={(event) => event.target.select()}
+                    />
+                    {status && (
+                        <div className={`crunchatize-save-status${status.ok ? '' : ' is-error'}`}>{status.message}</div>
+                    )}
+                </div>
+            )}
+        </div>
+    );
+}
+
 // Whether the player's typed messages go to the dice. A sticky setting, not
 // a one-shot: it stays where it's put until changed, and is read by
 // beforePrompt when the message actually arrives.
@@ -328,7 +668,7 @@ function RollToggle({stage, anonymizedId, refresh}: {
         <div className="crunchatize-rolltoggle">
             <div className="crunchatize-rolltoggle-header">
                 <span className="crunchatize-rolltoggle-label">Your messages</span>
-                <span className="crunchatize-rolltoggle-hint">{rolling ? 'rolls 2d6' : 'no roll'}</span>
+                <span className="crunchatize-rolltoggle-hint">{rolling ? 'rolls a d20' : 'no roll'}</span>
             </div>
             <div className="crunchatize-rolltoggle-options" role="group" aria-label="Roll for messages">
                 <button
@@ -363,11 +703,13 @@ function LastRoll({outcome}: {outcome: Outcome | null}): ReactElement | null {
     );
 }
 
-function PartyMemberRow({member, expanded, onToggle, onRemove, onSaveDetails, onViewPortrait}: {
+function PartyMemberRow({member, condition, expanded, onToggle, onRemove, onSetCondition, onSaveDetails, onViewPortrait}: {
     member: PartyMember;
+    condition: Condition;
     expanded: boolean;
     onToggle: () => void;
     onRemove: () => void;
+    onSetCondition: (condition: Condition) => void;
     onSaveDetails: (details: PartyMemberDetails) => void;
     onViewPortrait: (species: string) => void;
 }): ReactElement {
@@ -420,6 +762,26 @@ function PartyMemberRow({member, expanded, onToggle, onRemove, onSaveDetails, on
                     {details.nickname && <span className="crunchatize-party-species">{member.species}</span>}
                 </span>
                 <span className="crunchatize-party-level">Lv.{details.level}</span>
+                {condition !== 'ok' && (
+                    <span
+                        className={`crunchatize-condition crunchatize-condition--${condition}`}
+                        title={`${displayNameOf(member)} is ${condition} - click to clear`}
+                        role="button"
+                        tabIndex={0}
+                        onClick={(event) => {
+                            // The row itself toggles the details editor.
+                            event.stopPropagation();
+                            onSetCondition('ok');
+                        }}
+                        onKeyDown={(event) => {
+                            if (event.key === 'Enter' || event.key === ' ') {
+                                event.preventDefault();
+                                event.stopPropagation();
+                                onSetCondition('ok');
+                            }
+                        }}
+                    >{condition}</span>
+                )}
                 <span className="crunchatize-party-types">
                     {(info?.types ?? []).map(type => (
                         <span key={type} className={`crunchatize-type crunchatize-type--${type.toLowerCase()}`}>{type}</span>
@@ -440,7 +802,13 @@ function PartyMemberRow({member, expanded, onToggle, onRemove, onSaveDetails, on
                 // Mounted fresh on expand, so the CSS entry animations below
                 // run each time the row is opened.
                 <div className="crunchatize-party-details">
-                    <PartyMemberEditor details={details} onSave={onSaveDetails} onCancel={onToggle} />
+                    <PartyMemberEditor
+                        details={details}
+                        condition={condition}
+                        onSetCondition={onSetCondition}
+                        onSave={onSaveDetails}
+                        onCancel={onToggle}
+                    />
                     {imageOk && (
                         <button
                             type="button"
@@ -471,8 +839,10 @@ function PartyMemberRow({member, expanded, onToggle, onRemove, onSaveDetails, on
     );
 }
 
-function PartyMemberEditor({details, onSave, onCancel}: {
+function PartyMemberEditor({details, condition, onSetCondition, onSave, onCancel}: {
     details: PartyMemberDetails;
+    condition: Condition;
+    onSetCondition: (condition: Condition) => void;
     onSave: (details: PartyMemberDetails) => void;
     onCancel: () => void;
 }): ReactElement {
@@ -491,6 +861,18 @@ function PartyMemberEditor({details, onSave, onCancel}: {
                     value={nickname}
                     onChange={(event) => setNickname(event.target.value)}
                 />
+            </label>
+            {/* Applied on pick rather than on Save, unlike the fields around
+                it: condition is message state, which the stage writes back on
+                the next prompt, while the rest of this form is chat state
+                saved through the messenger right away. */}
+            <label className="crunchatize-party-editor-field">
+                <span className="crunchatize-party-editor-label">Condition</span>
+                <select value={condition} onChange={(event) => onSetCondition(event.target.value as Condition)}>
+                    <option value="ok">OK</option>
+                    <option value="hurt">Hurt</option>
+                    <option value="fainted">Fainted</option>
+                </select>
             </label>
             <label className="crunchatize-party-editor-field">
                 <span className="crunchatize-party-editor-label">Level</span>

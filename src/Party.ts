@@ -26,6 +26,25 @@ export interface PartyMember {
     details: PartyMemberDetails;
 }
 
+// A member's battle-readiness. Tracked separately from PartyMemberDetails
+// (the "build") since it's a running consequence of play, not something a
+// player sets and forgets - it belongs with message state, not the chat-wide
+// roster, so it rewinds with a swipe the same way the story does.
+export type Condition = 'ok' | 'hurt' | 'fainted';
+
+// Ordered worst-to-best, so a step down/up is just an index shift.
+const CONDITION_ORDER: Condition[] = ['fainted', 'hurt', 'ok'];
+
+export function stepConditionDown(condition: Condition): Condition {
+    const index = CONDITION_ORDER.indexOf(condition);
+    return CONDITION_ORDER[Math.max(index - 1, 0)];
+}
+
+export function stepConditionUp(condition: Condition): Condition {
+    const index = CONDITION_ORDER.indexOf(condition);
+    return CONDITION_ORDER[Math.min(index + 1, CONDITION_ORDER.length - 1)];
+}
+
 export function typesOf(member: PartyMember): MoemonType[] {
     return getSpecies(member.species)?.types ?? [];
 }
@@ -42,6 +61,28 @@ export function detailsOf(member: PartyMember): PartyMemberDetails {
         moves: Array.isArray(details.moves) ? [0, 1, 2, 3].map(i => details.moves[i] ?? '') : DEFAULT_DETAILS.moves,
         heldItem: typeof details.heldItem === 'string' ? details.heldItem : DEFAULT_DETAILS.heldItem
     };
+}
+
+// Reads a roster back from an untyped source - persisted chat state, or a
+// save bundle pasted into the import box. Anything that doesn't name a real
+// species is dropped, and details are normalised through detailsOf, so a
+// hand-edited or truncated bundle degrades to a smaller party rather than
+// throwing.
+export function parseParty(raw: any, source: PartySource = 'manual'): PartyMember[] {
+    if (!Array.isArray(raw)) return [];
+    const seen = new Set<string>();
+    const party: PartyMember[] = [];
+    for (const member of raw) {
+        if (!member || typeof member.species !== 'string') continue;
+        const info = getSpecies(member.species);
+        if (!info) continue;
+        // Canonical casing from the lorebook, so an imported "pikachu"
+        // matches everything keyed off the species name.
+        if (seen.has(info.name.toLowerCase())) continue;
+        seen.add(info.name.toLowerCase());
+        party.push({species: info.name, source, details: detailsOf(member)});
+    }
+    return party;
 }
 
 // What to call a member in the UI: their nickname if they have one.

@@ -35,9 +35,27 @@ mentioned in the story - a companion character card, something you say you're se
 also add or remove entries by hand at any time from the panel itself, in case the auto-detection guesses wrong. The panel also shows the
 result of your last roll.
 <br><br>
+**Keeping the story straight**<br>
+Long chats drift. The panel also tracks the things a narrator otherwise forgets once they scroll out of context: open plot threads, the
+characters you keep running into (and how they feel about you, which shifts as checks involving them land well or badly), and where and when
+the current scene is happening. These are folded into the same periodic reminder as your party and bag, so they cost tokens on an interval
+rather than every turn.
+<br><br>
+Your moemon also carry a condition now. A critical failure knocks the acting moemon down a peg - fine, then hurt, then fainted - and a
+critical success pulls her back up one. It feeds into how later checks are judged rather than blocking anything outright, and you can always
+set it by hand from the panel if the narration says otherwise. Whatever a moemon is holding is now told to the judge too, so a held item can
+actually matter to a roll instead of being decoration.
+<br><br>
+**Carrying a party between chats**<br>
+The panel's "Save data" section exports your roster, bag, threads, characters and scene as a block of text you can paste into another chat
+to pick up where you left off.
+<br><br>
 I've tagged the stage NSFW, but there isn't anything in the stage that would render a wholesome chat inappropriate. However, my example bot is NSFW, and I'm sure other bots that attach this stage could be, too.
 <br><br>
 **Updates:**<br>
+08/27/2026 - Added condition tracking (a critical result knocks a moemon down or picks her back up), and started telling the judge what a
+moemon is holding. The panel now also tracks open plot threads, recurring characters and how they feel about you, and the current scene -
+all folded into the existing roster reminder. Added export/import, so a party can move between chats.<br>
 08/27/2026 - Replaced the external zero-shot classifier with a d20 roll judged directly by the same model powering your chat: one call instead of two, no more third-party backend, and the roll never appears in chat - only in the panel. Dropped the type-matchup/domain modifier system in favor of letting the bot judge holistically.<br>
 08/25/2026 - Reworked the stage around a Moemon lorebook: party tracking (with a small panel UI for manual add/remove), and checks now driven by party type matchups and scene domain instead of the old eight-stat skill system. Leveling/XP removed.<br>
 06/26/2025 - Hugging Face CORS issues broke the stage for a few days; I wrote a new client for it.<br>

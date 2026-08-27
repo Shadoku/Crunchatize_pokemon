@@ -4,9 +4,14 @@ import {LoadResponse} from "@chub-ai/stages-ts/dist/types/load";
 import {Action} from "./Action";
 import {Outcome, Result, ResultDescription} from "./Outcome";
 import {getSpecies, findSpeciesMentions, escapeRegex} from "./Lore";
-import {PartyMember, PartyMemberDetails, DEFAULT_DETAILS, detailsOf, displayNameOf, labelFor, typesOf} from "./Party";
+import {
+    PartyMember, PartyMemberDetails, DEFAULT_DETAILS, detailsOf, displayNameOf, labelFor, typesOf,
+    Condition, stepConditionDown, stepConditionUp, parseParty
+} from "./Party";
 import {defaultDetailsFor} from "./Moveset";
 import {InventoryItem, parseInventory, sameItem} from "./Inventory";
+import {QuestEntry, parseQuests, newQuestId} from "./Quest";
+import {NpcEntry, parseNpcs, clampAffinity, sameNpc, describeAffinity, findNpcMentions} from "./Npc";
 import {PartyPanel} from "./PartyPanel";
 
 type MessageStateType = any;
@@ -36,6 +41,11 @@ interface UserState {
     // Prompts since the roster was last put in front of the LLM. Lives in
     // message state so rewinding the chat rewinds the cadence with it.
     turnsSinceRoster: number;
+    // Condition (ok/hurt/fainted) per party member, keyed by lowercase
+    // species. Lives in message state, not the chat-wide roster: it's a
+    // running consequence of play, so a swipe should rewind it along with
+    // the story rather than carry it into a branch where it never happened.
+    partyStatus: {[speciesLower: string]: Condition};
 }
 
 // How many prompts pass between roster reminders. The roster is reference
@@ -47,6 +57,26 @@ const DEFAULT_ROSTER_INTERVAL = 6;
 // it needs a ceiling well inside Chub's own patience for a stage.
 const CLASSIFIER_TIMEOUT_MS = 12000;
 
+// How far a check involving an NPC moves where the player stands with them.
+// Criticals move twice as far, matching how they're the only results that
+// move a party member's condition.
+const AFFINITY_SHIFT: {[result in Result]: number} = {
+    [Result.CriticalSuccess]: 2,
+    [Result.Success]: 1,
+    [Result.Failure]: -1,
+    [Result.CriticalFailure]: -2,
+    [Result.None]: 0
+};
+
+// Beyond this many tracked NPCs, only the most recently added are put in
+// front of the LLM - the roster note is reference material, not a directory.
+const MAX_NPCS_IN_NOTE = 6;
+
+// Stamped into exported bundles. Nothing reads it yet - every field is
+// validated on import regardless - but it's what a future format change
+// would branch on to migrate an older save instead of rejecting it.
+const SAVE_VERSION = 1;
+
 // Chat-wide (not tied to a branch) record of what the player has set up by
 // hand in the panel: their explicit party edits, and their bag. Both are
 // edited outside the normal lifecycle hooks, so they're persisted straight
@@ -56,7 +86,24 @@ interface ChatPartyState {
     inventory: InventoryItem[];
     // Whether typed messages are put to the dice. Set from the panel.
     rollEnabled: boolean;
+    // Open plot threads, and the recurring characters the story keeps
+    // returning to. Chat-wide rather than message state: a thread the player
+    // opened shouldn't vanish because they swiped a reply away.
+    quests: QuestEntry[];
+    npcs: NpcEntry[];
+    // Where and when the scene is taking place. Shared by everyone in the
+    // chat - see setEnvironment for why it's stored per-user anyway.
+    environment: string;
 }
+
+const EMPTY_CHAT_STATE: ChatPartyState = {
+    manualParty: [],
+    inventory: [],
+    rollEnabled: true,
+    quests: [],
+    npcs: [],
+    environment: ''
+};
 
 export class Stage extends StageBase<InitStateType, ChatStateType, MessageStateType, ConfigType> {
 
@@ -104,7 +151,8 @@ export class Stage extends StageBase<InitStateType, ChatStateType, MessageStateT
             lastNarratorResponse: '',
             // Starts due, so the LLM gets the roster on the first prompt
             // rather than only after a full interval has gone by.
-            turnsSinceRoster: this.rosterInterval
+            turnsSinceRoster: this.rosterInterval,
+            partyStatus: {}
         }
     }
 
@@ -160,9 +208,18 @@ export class Stage extends StageBase<InitStateType, ChatStateType, MessageStateT
     // the party and the bag live side by side, so a wholesale replace here
     // would silently drop whichever one wasn't being edited.
     async patchChatState(anonymizedId: string, patch: Partial<ChatPartyState>): Promise<void> {
-        const existing = this.chatState[anonymizedId] ?? {manualParty: [], inventory: [], rollEnabled: true};
-        this.chatState = {...this.chatState, [anonymizedId]: {...existing, ...patch}};
+        this.stageChatState(anonymizedId, patch);
         await this.messenger.updateChatState(this.chatState);
+    }
+
+    // The in-memory half of patchChatState, for the one caller that runs
+    // inside beforePrompt: that hook returns chatState in its response, so
+    // pushing the same write through the messenger as well would spend a
+    // round-trip Chub is actively waiting on to say what it's about to be
+    // told anyway.
+    stageChatState(anonymizedId: string, patch: Partial<ChatPartyState>): void {
+        const existing = this.chatState[anonymizedId] ?? EMPTY_CHAT_STATE;
+        this.chatState = {...this.chatState, [anonymizedId]: {...existing, ...patch}};
     }
 
     // Adds a moemon to the player's roster by hand, at the level given (its
@@ -235,6 +292,172 @@ export class Stage extends StageBase<InitStateType, ChatStateType, MessageStateT
         await this.patchChatState(anonymizedId, {inventory: updated});
     }
 
+    getQuests(anonymizedId: string): QuestEntry[] {
+        return parseQuests(this.chatState[anonymizedId]?.quests);
+    }
+
+    async addQuest(anonymizedId: string, text: string): Promise<void> {
+        const trimmed = text.trim();
+        if (!trimmed) return;
+        const quests = [...this.getQuests(anonymizedId), {id: newQuestId(), text: trimmed, done: false}];
+        await this.patchChatState(anonymizedId, {quests});
+    }
+
+    async toggleQuest(anonymizedId: string, id: string): Promise<void> {
+        const quests = this.getQuests(anonymizedId)
+            .map(quest => quest.id === id ? {...quest, done: !quest.done} : quest);
+        await this.patchChatState(anonymizedId, {quests});
+    }
+
+    async removeQuest(anonymizedId: string, id: string): Promise<void> {
+        const quests = this.getQuests(anonymizedId).filter(quest => quest.id !== id);
+        await this.patchChatState(anonymizedId, {quests});
+    }
+
+    getNpcs(anonymizedId: string): NpcEntry[] {
+        return parseNpcs(this.chatState[anonymizedId]?.npcs);
+    }
+
+    async addNpc(anonymizedId: string, name: string, note: string = ''): Promise<void> {
+        const trimmed = name.trim();
+        if (!trimmed) return;
+        const existing = this.getNpcs(anonymizedId);
+        if (existing.some(npc => sameNpc(npc.name, trimmed))) return;
+        await this.patchChatState(anonymizedId, {
+            npcs: [...existing, {name: trimmed, note: note.trim(), affinity: 0}]
+        });
+    }
+
+    async updateNpc(anonymizedId: string, name: string, patch: Partial<NpcEntry>): Promise<void> {
+        const npcs = this.getNpcs(anonymizedId).map(npc => sameNpc(npc.name, name)
+            ? {...npc, ...patch, affinity: clampAffinity(patch.affinity ?? npc.affinity)}
+            : npc);
+        await this.patchChatState(anonymizedId, {npcs});
+    }
+
+    async removeNpc(anonymizedId: string, name: string): Promise<void> {
+        const npcs = this.getNpcs(anonymizedId).filter(npc => !sameNpc(npc.name, name));
+        await this.patchChatState(anonymizedId, {npcs});
+    }
+
+    // Shifts the standing of every tracked NPC named in the action or in the
+    // narration it answers. Auto-detection in the same spirit as the party
+    // list: a guess the player can always correct from the panel. Only
+    // existing entries move - a name appearing in prose isn't evidence it's
+    // an NPC worth tracking, so nothing is created here.
+    applyOutcomeAffinity(anonymizedId: string, outcome: Outcome): void {
+        const shift = AFFINITY_SHIFT[outcome.result] ?? 0;
+        if (shift === 0) return;
+
+        const npcs = this.getNpcs(anonymizedId);
+        if (npcs.length === 0) return;
+
+        const context = `${outcome.action.description ?? ''}\n${this.getUserState(anonymizedId).lastNarratorResponse}`;
+        const mentioned = findNpcMentions(context, npcs);
+        if (mentioned.length === 0) return;
+
+        const touched = new Set(mentioned.map(npc => npc.name.toLowerCase()));
+        this.stageChatState(anonymizedId, {
+            npcs: npcs.map(npc => touched.has(npc.name.toLowerCase())
+                ? {...npc, affinity: clampAffinity(npc.affinity + shift)}
+                : npc)
+        });
+    }
+
+    // Everything chat-wide worth carrying between chats: the roster the
+    // player built, their bag, their open threads, who they know, and where
+    // they are. Message state (auto-detected party, last roll, conditions)
+    // stays out - it's derived from the story being exported away from.
+    exportSave(anonymizedId: string): string {
+        return JSON.stringify({
+            version: SAVE_VERSION,
+            manualParty: this.getManualParty(anonymizedId),
+            inventory: this.getInventory(anonymizedId),
+            quests: this.getQuests(anonymizedId),
+            npcs: this.getNpcs(anonymizedId),
+            environment: this.getEnvironment()
+        }, null, 2);
+    }
+
+    // Replaces the player's chat-wide state from a pasted bundle. Every field
+    // goes through the same validators used to read persisted state, so a
+    // truncated or hand-edited bundle loses the bad entries rather than the
+    // whole import.
+    async importSave(anonymizedId: string, json: string): Promise<{success: boolean; error?: string}> {
+        let parsed: any;
+        try {
+            parsed = JSON.parse(json);
+        } catch {
+            return {success: false, error: 'That is not valid JSON.'};
+        }
+        if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+            return {success: false, error: 'That JSON is not a save bundle.'};
+        }
+
+        const manualParty = parseParty(parsed.manualParty);
+        const inventory = parseInventory(parsed.inventory);
+        const quests = parseQuests(parsed.quests);
+        const npcs = parseNpcs(parsed.npcs);
+        const environment = typeof parsed.environment === 'string' ? parsed.environment.trim() : '';
+
+        // A bundle that contributes nothing recognisable is far more likely a
+        // paste of the wrong thing than a deliberate wipe, so it's refused
+        // rather than silently clearing the roster.
+        if (manualParty.length === 0 && inventory.length === 0 && quests.length === 0
+            && npcs.length === 0 && !environment) {
+            return {success: false, error: 'No usable party, bag, threads, or characters in that bundle.'};
+        }
+
+        await this.patchChatState(anonymizedId, {manualParty, inventory, quests, npcs});
+        // Written across every player's slot, unlike the rest of the bundle.
+        if (environment) await this.setEnvironment(environment);
+        return {success: true};
+    }
+
+    // The scene everyone in the chat shares. chatState is keyed per user, so
+    // rather than reshaping it (and migrating every chat already saved), the
+    // same value is written into each player's slot and read back from
+    // whichever one answers first.
+    getEnvironment(): string {
+        for (const state of Object.values(this.chatState)) {
+            const environment = typeof state?.environment === 'string' ? state.environment.trim() : '';
+            if (environment) return environment;
+        }
+        return '';
+    }
+
+    async setEnvironment(environment: string): Promise<void> {
+        const trimmed = environment.trim();
+        for (const user of Object.values(this.users)) {
+            await this.patchChatState(user.anonymizedId, {environment: trimmed});
+        }
+    }
+
+    getCondition(anonymizedId: string, species: string): Condition {
+        return this.getUserState(anonymizedId).partyStatus[species.toLowerCase()] ?? 'ok';
+    }
+
+    // Manual override from the panel - corrects an auto-nudge or applies a
+    // status the narration described but the classifier didn't trigger.
+    setCondition(anonymizedId: string, species: string, condition: Condition): void {
+        const userState = this.getUserState(anonymizedId);
+        userState.partyStatus = {...userState.partyStatus, [species.toLowerCase()]: condition};
+    }
+
+    // A critical result nudges the acting member's condition one notch;
+    // everything else (including plain Failure/Success) leaves it alone -
+    // this is flavor for the dramatic swings, not a full HP economy.
+    applyOutcomeCondition(anonymizedId: string, member: PartyMember|undefined, result: Result): void {
+        if (!member) return;
+
+        const current = this.getCondition(anonymizedId, member.species);
+        if (result === Result.CriticalFailure) {
+            this.setCondition(anonymizedId, member.species, stepConditionDown(current));
+        } else if (result === Result.CriticalSuccess) {
+            this.setCondition(anonymizedId, member.species, stepConditionUp(current));
+        }
+    }
+
     // Whether the player's next message goes to the dice. Persisted per
     // player, so the choice survives a reload; defaults to rolling.
     isRollEnabled(anonymizedId: string): boolean {
@@ -278,8 +501,11 @@ export class Stage extends StageBase<InitStateType, ChatStateType, MessageStateT
         const actingMember = this.findActingMember(party, sequence);
         const actor = actingMember ? displayNameOf(actingMember) : null;
 
-        const result = await this.classifyOutcome(this.buildClassificationPrompt(anonymizedId, sequence, roll));
-        return new Outcome(roll, result, new Action(text, actor));
+        const result = await this.classifyOutcome(this.buildClassificationPrompt(anonymizedId, sequence, roll, actingMember));
+        const outcome = new Outcome(roll, result, new Action(text, actor));
+        this.applyOutcomeCondition(anonymizedId, actingMember, result);
+        this.applyOutcomeAffinity(anonymizedId, outcome);
+        return outcome;
     }
 
     // Turns a configured difficulty modifier into a plain-language lean for
@@ -294,16 +520,39 @@ export class Stage extends StageBase<InitStateType, ChatStateType, MessageStateT
             : `Judge ${intensity} more strictly than usual.`;
     }
 
-    buildClassificationPrompt(anonymizedId: string, sequence: string, roll: number): string {
+    // What the judge should know about whoever is taking the action: what
+    // they're carrying, and whether they're in any shape to act. Both are
+    // handed over as plain description rather than as rules - the model
+    // decides whether a Focus Sash or a limp matters to *this* action, the
+    // same way it decides everything else.
+    actorNote(anonymizedId: string, member: PartyMember|undefined): string {
+        if (!member) return '';
+        const name = displayNameOf(member);
+        const facts: string[] = [];
+
+        const heldItem = detailsOf(member).heldItem.trim();
+        if (heldItem) facts.push(`is holding ${heldItem}`);
+
+        const condition = this.getCondition(anonymizedId, member.species);
+        if (condition !== 'ok') facts.push(`is ${condition}`);
+
+        return facts.length > 0 ? `${name} ${facts.join(' and ')}.` : '';
+    }
+
+    buildClassificationPrompt(anonymizedId: string, sequence: string, roll: number, actingMember?: PartyMember): string {
         const lastNarratorResponse = this.getUserState(anonymizedId).lastNarratorResponse;
         const roster = this.buildRosterNote(anonymizedId);
         const hint = this.difficultyHint();
+        const setting = this.getEnvironment();
+        const actor = this.actorNote(anonymizedId, actingMember);
 
         return [
             `Resolve this dice check for a Pokémon-style tabletop roleplay.`,
             lastNarratorResponse ? `Previous narration: ${lastNarratorResponse}` : null,
+            setting ? `Setting: ${setting}` : null,
             roster ? `Party: ${roster}` : null,
             `Action: ${sequence}`,
+            actor ? `Actor: ${actor}` : null,
             `d20 roll: ${roll} (1-20)`,
             hint ? `Note: ${hint}` : null,
             `Respond with exactly one word: NoCheck, Failure, Success, CriticalSuccess, or CriticalFailure.`
@@ -482,8 +731,7 @@ export class Stage extends StageBase<InitStateType, ChatStateType, MessageStateT
             .join(', ');
     }
 
-    // Roster reference for the LLM, appended to the prompt every
-    // rosterInterval turns rather than every turn. Movesets are deliberately
+    // Who's in the party and what they're carrying. Movesets are deliberately
     // left out: they're the bulkiest part and the narrator doesn't need a
     // move list to describe what a moemon does.
     buildRosterNote(anonymizedId: string): string {
@@ -496,6 +744,8 @@ export class Stage extends StageBase<InitStateType, ChatStateType, MessageStateT
                 const details = detailsOf(member);
                 const facts = [`${typesOf(member).join('/') || '???'}-type`, `Lv.${details.level}`];
                 if (details.heldItem) facts.push(`holding ${details.heldItem}`);
+                const condition = this.getCondition(anonymizedId, member.species);
+                if (condition !== 'ok') facts.push(condition);
                 // Nicknamed members read as "Sparky" (Pikachu, Electric-type,
                 // ...) so the narrator can use the nickname and still knows
                 // what she is.
@@ -507,6 +757,36 @@ export class Stage extends StageBase<InitStateType, ChatStateType, MessageStateT
         return `${user.name}'s party: ${roster}.${bag ? ` Carrying: ${bag}.` : ''}`;
     }
 
+    // Everything the narrator is periodically reminded of: the roster, plus
+    // the continuity a long chat loses once it scrolls out of context. Kept
+    // separate from buildRosterNote because the two have different readers -
+    // this goes to the narrator on an interval, while the judge gets the
+    // roster on its own, as one line among several it weighs per check.
+    buildContextNote(anonymizedId: string): string {
+        const roster = this.buildRosterNote(anonymizedId);
+        if (!roster) return '';
+        const lines = [roster];
+
+        const setting = this.getEnvironment();
+        if (setting) lines.push(`Setting: ${setting}.`);
+
+        // Only open threads go over: a finished quest is a closed loop, and
+        // restating it invites the narrator to reopen it.
+        const open = this.getQuests(anonymizedId).filter(quest => !quest.done);
+        if (open.length > 0) lines.push(`Open threads: ${open.map(quest => quest.text).join('; ')}.`);
+
+        const npcs = this.getNpcs(anonymizedId).slice(-MAX_NPCS_IN_NOTE);
+        if (npcs.length > 0) {
+            lines.push(`Known characters: ${npcs.map(npc => {
+                const facts = [describeAffinity(npc.affinity)];
+                if (npc.note) facts.unshift(npc.note);
+                return `${npc.name} (${facts.join('; ')})`;
+            }).join('; ')}.`);
+        }
+
+        return lines.join(' ');
+    }
+
     // Counts down to the next roster reminder, returning the note only on the
     // turns it's actually due.
     rosterNoteIfDue(anonymizedId: string): string {
@@ -515,7 +795,7 @@ export class Stage extends StageBase<InitStateType, ChatStateType, MessageStateT
         userState.turnsSinceRoster = (userState.turnsSinceRoster ?? 0) + 1;
         if (userState.turnsSinceRoster < this.rosterInterval) return '';
         userState.turnsSinceRoster = 0;
-        const note = this.buildRosterNote(anonymizedId);
+        const note = this.buildContextNote(anonymizedId);
         return note ? `\n[INST]${note}[/INST]` : '';
     }
 
@@ -537,15 +817,32 @@ export class Stage extends StageBase<InitStateType, ChatStateType, MessageStateT
                 // Rewinding the chat rewinds the reminder cadence too, so a
                 // swiped-away turn doesn't leave the counter out of step.
                 userState.turnsSinceRoster = messageState[user.anonymizedId]?.['turnsSinceRoster'] ?? this.rosterInterval;
+                userState.partyStatus = this.parsePartyStatus(messageState[user.anonymizedId]?.['partyStatus']);
             } else {
                 userState.autoParty = [];
                 userState.lastOutcome = null;
                 userState.lastOutcomePrompt = '';
                 userState.lastNarratorResponse = '';
                 userState.turnsSinceRoster = this.rosterInterval;
+                userState.partyStatus = {};
             }
             this.userState[user.anonymizedId] = userState;
         }
+    }
+
+    // Reads conditions back from (untyped) message state, dropping keys that
+    // no longer name a species and values that aren't conditions - the same
+    // defensiveness autoParty gets, for the same reason.
+    parsePartyStatus(raw: any): {[speciesLower: string]: Condition} {
+        if (!raw || typeof raw !== 'object') return {};
+        const parsed: {[speciesLower: string]: Condition} = {};
+        for (const [species, condition] of Object.entries(raw)) {
+            if (!getSpecies(species)) continue;
+            if (condition === 'hurt' || condition === 'fainted' || condition === 'ok') {
+                parsed[species.toLowerCase()] = condition;
+            }
+        }
+        return parsed;
     }
 
     convertOutcome(input: any): Outcome {
@@ -565,7 +862,8 @@ export class Stage extends StageBase<InitStateType, ChatStateType, MessageStateT
                 lastOutcome: userState.lastOutcome ?? null,
                 lastOutcomePrompt: userState.lastOutcomePrompt ?? '',
                 lastNarratorResponse: userState.lastNarratorResponse ?? '',
-                turnsSinceRoster: userState.turnsSinceRoster ?? 0
+                turnsSinceRoster: userState.turnsSinceRoster ?? 0,
+                partyStatus: userState.partyStatus ?? {}
             };
         }
         return messageState;
