@@ -4,6 +4,7 @@ import {speciesNames, getSpecies, speciesImageUrl} from "./Lore";
 import {anchorFor, onAnchorsLoaded} from "./Portrait";
 import {PartyMember, PartyMemberDetails, DEFAULT_DETAILS, detailsOf, displayNameOf} from "./Party";
 import {itemCategories} from "./Inventory";
+import {Outcome, ResultClass} from "./Outcome";
 
 function clampLevel(value: string): number {
     return Math.min(Math.max(Math.floor(Number(value)) || 1, 1), 100);
@@ -161,6 +162,7 @@ function PartyBlock({stage, anonymizedId, name, refresh, onViewPortrait}: {
             </div>
             <InventoryPanel stage={stage} anonymizedId={anonymizedId} refresh={refresh} />
             <RollToggle stage={stage} anonymizedId={anonymizedId} refresh={refresh} />
+            <LastRoll outcome={stage.getUserState(anonymizedId).lastOutcome} />
         </div>
     );
 }
@@ -342,6 +344,21 @@ function RollToggle({stage, anonymizedId, refresh}: {
                     onClick={() => set(false)}
                 >No Roll</button>
             </div>
+        </div>
+    );
+}
+
+// The result of the player's last dice check. This is the only place the
+// numeric roll is ever shown - it never appears in chat or chat history,
+// since the narrator is only ever told the qualitative outcome.
+function LastRoll({outcome}: {outcome: Outcome | null}): ReactElement | null {
+    if (!outcome) return null;
+
+    return (
+        <div className={`crunchatize-lastroll crunchatize-lastroll-${ResultClass[outcome.result]}`}>
+            <span className="crunchatize-lastroll-label">Last Roll</span>
+            <span className="crunchatize-lastroll-roll">d20: {outcome.roll}</span>
+            <span className="crunchatize-lastroll-result">{outcome.getLabel()}</span>
         </div>
     );
 }

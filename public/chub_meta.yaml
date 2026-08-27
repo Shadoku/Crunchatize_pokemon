@@ -15,9 +15,7 @@ Crunchatize may be the stage for you!<br>
 <br>
 **What's it do?**<br>
 This build of Crunchatize is wired up to a Moemon (moe-anthropomorphized Pokémon) lorebook. Instead of grading every input against one of eight
-generic human attributes, it looks at what's actually in play: who's in your party, what type(s) they are, and what kind of scene you're in.
-Dice are still rolled and modifiers still added, but the modifier now comes from type matchups (is your Charizard breathing fire on a Grass-type
-challenge, or trying to put one out?) rather than a fixed Might/Grace/Brains-style skill check.
+generic human attributes, it looks at what's actually in play: who's in your party and what kind of scene you're in.
 <br><br>
 <img src=\"https://avatars.charhub.io/avatars/uploads/images/gallery/file/7564e258-4f34-4ebd-97d9-402ef0508c21/685eece8-d6c7-4a6a-8457-809c01040a11.png\" alt=\"Example Screenshot\" style=\"display: block; margin: auto; width: 40%; height: auto; max-width: 938px;\"/>
 <br><br>
@@ -26,26 +24,21 @@ this stage asks you to forfeit some agency over the details of your actions;
 the bot will be specifically instructed to take your check result and paraphrase your choices as it narrates, rather than accept your input as canon.
 As a result, you may find that you are better off simply describing the nature or attitude of the action you intend to take and allowing the bot to fill in the details.
 <br><br>
-The stage is vaguely inspired by \"Powered by the Apocalypse\" rules, where 2d6 are rolled and modifiers added or subtracted to arrive at
-one of four degrees of success: failure, mixed success, straight success, and critical success. There's no more XP grind or leveling; your
-'build' is just whichever moemon you've got with you.
+Every action rolls a d20 behind the scenes. Rather than adding up modifiers to a fixed threshold, the roll, your action, your party, and the
+bot's last reply are handed to the same model powering your chat, which judges the outcome directly as one of: no check needed, failure,
+success, critical success, or critical failure. There's no more XP grind or leveling; your 'build' is just whichever moemon you've got with you.
+The roll itself never appears in the chat - only the panel shows it, so the narration reads cleanly while you can still see what you rolled.
 <br><br>
 **Party tracking**<br>
 The stage keeps a little panel (visible alongside the chat) showing each player's current party. It fills in automatically as moemon are
 mentioned in the story - a companion character card, something you say you're sending out, something the narrator introduces - and you can
-also add or remove entries by hand at any time from the panel itself, in case the auto-detection guesses wrong.
-<br><br>
-When you take an action, if you name one of your own party members, that moemon is treated as the one acting, and their type(s) are checked
-against the elemental domain of the scene for a bonus or penalty. If you don't name anyone specific, your whole party chips in ambiently, at
-reduced strength. If nothing in the scene reads as elemental/risky at all, no roll happens - same as before.
-<br><br>
-You can view console output to see the classification results the stage uses to arrive at its domain and difficulty assessments.
-These are zero-shot classifications, which are pretty naive and lack significant context; I am continuing to tweak and improve,
-but it is pretty easy to skew the results through the language you use in your input.
+also add or remove entries by hand at any time from the panel itself, in case the auto-detection guesses wrong. The panel also shows the
+result of your last roll.
 <br><br>
 I've tagged the stage NSFW, but there isn't anything in the stage that would render a wholesome chat inappropriate. However, my example bot is NSFW, and I'm sure other bots that attach this stage could be, too.
 <br><br>
 **Updates:**<br>
+08/27/2026 - Replaced the external zero-shot classifier with a d20 roll judged directly by the same model powering your chat: one call instead of two, no more third-party backend, and the roll never appears in chat - only in the panel. Dropped the type-matchup/domain modifier system in favor of letting the bot judge holistically.<br>
 08/25/2026 - Reworked the stage around a Moemon lorebook: party tracking (with a small panel UI for manual add/remove), and checks now driven by party type matchups and scene domain instead of the old eight-stat skill system. Leveling/XP removed.<br>
 06/26/2025 - Hugging Face CORS issues broke the stage for a few days; I wrote a new client for it.<br>
 08/05/2025 - Forced to update by Hugging Face.<br>
@@ -97,7 +90,9 @@ config_schema:
   properties:
     difficultyModifier:
       title: Difficulty Modifier
-      description: Universal modifier added (or subtracted) for all rolls.
+      description: >-
+        Nudges how generously or strictly the bot judges every check. Positive
+        leans generous, negative leans strict, 0 is neutral.
       type: integer
       default: 0
     rosterReminderInterval:

@@ -3,7 +3,6 @@ import {StageBase, StageResponse, InitialData, Message, Character, User} from "@
 import {LoadResponse} from "@chub-ai/stages-ts/dist/types/load";
 import {Action} from "./Action";
 import {Outcome, Result, ResultDescription} from "./Outcome";
-import {MoemonType, TypeDomainDescription, bestEffectiveness, modifierForMultiplier} from "./MoemonType";
 import {getSpecies, findSpeciesMentions, escapeRegex} from "./Lore";
 import {PartyMember, PartyMemberDetails, DEFAULT_DETAILS, detailsOf, displayNameOf, labelFor, typesOf} from "./Party";
 import {defaultDetailsFor} from "./Moveset";
@@ -31,6 +30,9 @@ interface UserState {
     autoParty: PartyMember[];
     lastOutcome: Outcome|null;
     lastOutcomePrompt: string;
+    // The narrator's last reply, truncated the same way it's shown to the
+    // player. Fed into the next action's classification prompt as context.
+    lastNarratorResponse: string;
     // Prompts since the roster was last put in front of the LLM. Lives in
     // message state so rewinding the chat rewinds the cadence with it.
     turnsSinceRoster: number;
@@ -42,10 +44,8 @@ interface UserState {
 const DEFAULT_ROSTER_INTERVAL = 6;
 
 // The classifier is awaited inside beforePrompt, which Chub is waiting on, so
-// it needs a ceiling: a single attempt, and all retries together, must finish
-// well inside Chub's own patience for a stage.
-const PIPELINE_TIMEOUT_MS = 12000;
-const CLASSIFIER_BUDGET_MS = 25000;
+// it needs a ceiling well inside Chub's own patience for a stage.
+const CLASSIFIER_TIMEOUT_MS = 12000;
 
 // Chat-wide (not tied to a branch) record of what the player has set up by
 // hand in the panel: their explicit party edits, and their bag. Both are
@@ -57,23 +57,6 @@ interface ChatPartyState {
     // Whether typed messages are put to the dice. Set from the panel.
     rollEnabled: boolean;
 }
-
-const DOMAIN_HYPOTHESIS = 'The narrator\'s action principally draws upon {}.';
-const MUNDANE_LABEL = 'ordinary conversation or a risk-free action';
-const DOMAIN_MAPPING: {[key: string]: MoemonType|null} = Object.values(MoemonType).reduce((map, type) => {
-    map[TypeDomainDescription[type]] = type;
-    return map;
-}, {[MUNDANE_LABEL]: null} as {[key: string]: MoemonType|null});
-
-const DIFFICULTY_HYPOTHESIS = 'On a scale of 1-6, the difficulty of the narrator\'s actions is {}.';
-const DIFFICULTY_MAPPING: {[key: string]: number} = {
-    '1 (simple and safe)': 1000,
-    '2 (straightforward or fiddly)': 1,
-    '3 (complex or tricky)': 0,
-    '4 (challenging and risky)': -1,
-    '5 (arduous and dangerous)': -2,
-    '6 (virtually impossible)': -3
-};
 
 export class Stage extends StageBase<InitStateType, ChatStateType, MessageStateType, ConfigType> {
 
@@ -118,6 +101,7 @@ export class Stage extends StageBase<InitStateType, ChatStateType, MessageStateT
             autoParty: [],
             lastOutcome: null,
             lastOutcomePrompt: '',
+            lastNarratorResponse: '',
             // Starts due, so the LLM gets the roster on the first prompt
             // rather than only after a full interval has gone by.
             turnsSinceRoster: this.rosterInterval
@@ -279,49 +263,93 @@ export class Stage extends StageBase<InitStateType, ChatStateType, MessageStateT
         this.setStateFromMessageState(state);
     }
 
-    // Classifies a line of action and works out its modifiers. Shared by the
+    // Resolves a line of action: rolls a d20 and asks the platform's own LLM
+    // to judge the outcome from the roll plus scene context. Shared by the
     // normal chat path and by panel-initiated actions like using an item,
     // which never pass through beforePrompt and so must be resolved here.
-    async resolveAction(anonymizedId: string, text: string, charName: string = ''): Promise<Action> {
+    async resolveAction(anonymizedId: string, text: string, charName: string = ''): Promise<Outcome> {
         const sequence = this.replaceTags(text, {
             "user": this.users[anonymizedId]?.name ?? '',
             "char": charName
         });
 
-        // Kick both classifications off together; only the difficulty one needs awaiting first.
-        const domainPromise = this.query({sequence: sequence, candidate_labels: Object.keys(DOMAIN_MAPPING), hypothesis_template: DOMAIN_HYPOTHESIS, multi_label: true});
-
-        let difficultyRating: number = 0;
-        const difficultyResponse = await this.query({sequence: sequence, candidate_labels: Object.keys(DIFFICULTY_MAPPING), hypothesis_template: DIFFICULTY_HYPOTHESIS, multi_label: true });
-        if (difficultyResponse && difficultyResponse.labels[0]) {
-            difficultyRating = DIFFICULTY_MAPPING[difficultyResponse.labels[0]] + this.globalModifier;
-            console.log(`Difficulty modifier selected: ${difficultyRating}`);
-        }
-
-        let domain: MoemonType|null = null;
-        const domainResponse = await domainPromise;
-        if (domainResponse && domainResponse.labels && domainResponse.scores[0] > 0.1) {
-            domain = DOMAIN_MAPPING[domainResponse.labels[0]];
-            console.log(`Domain selected: ${domain}`);
-        }
-
-        if (!domain || difficultyRating >= 1000) return new Action(text, null, 0, 0, null);
-
+        const roll = 1 + Math.floor(Math.random() * 20);
         const party = this.getFullParty(anonymizedId);
         const actingMember = this.findActingMember(party, sequence);
+        const actor = actingMember ? displayNameOf(actingMember) : null;
 
-        let typeModifier = 0;
-        let actor: string|null = null;
-        if (actingMember) {
-            actor = displayNameOf(actingMember);
-            typeModifier = modifierForMultiplier(bestEffectiveness(typesOf(actingMember), domain));
-        } else if (party.length > 0) {
-            // No specific actor named; the party supports ambiently, at half strength.
-            const bestMatch = Math.max(...party.map(member => bestEffectiveness(typesOf(member), domain as MoemonType)));
-            typeModifier = Math.round(modifierForMultiplier(bestMatch) / 2);
+        const result = await this.classifyOutcome(this.buildClassificationPrompt(anonymizedId, sequence, roll));
+        return new Outcome(roll, result, new Action(text, actor));
+    }
+
+    // Turns a configured difficulty modifier into a plain-language lean for
+    // the classification prompt, since there's no longer a numeric total to
+    // add it to.
+    difficultyHint(): string {
+        const magnitude = Math.abs(this.globalModifier);
+        if (magnitude === 0) return '';
+        const intensity = magnitude >= 3 ? 'much' : magnitude >= 2 ? 'somewhat' : 'slightly';
+        return this.globalModifier > 0
+            ? `Judge ${intensity} more generously than usual.`
+            : `Judge ${intensity} more strictly than usual.`;
+    }
+
+    buildClassificationPrompt(anonymizedId: string, sequence: string, roll: number): string {
+        const lastNarratorResponse = this.getUserState(anonymizedId).lastNarratorResponse;
+        const roster = this.buildRosterNote(anonymizedId);
+        const hint = this.difficultyHint();
+
+        return [
+            `Resolve this dice check for a Pokémon-style tabletop roleplay.`,
+            lastNarratorResponse ? `Previous narration: ${lastNarratorResponse}` : null,
+            roster ? `Party: ${roster}` : null,
+            `Action: ${sequence}`,
+            `d20 roll: ${roll} (1-20)`,
+            hint ? `Note: ${hint}` : null,
+            `Respond with exactly one word: NoCheck, Failure, Success, CriticalSuccess, or CriticalFailure.`
+        ].filter((line): line is string => !!line).join('\n');
+    }
+
+    async classifyOutcome(prompt: string): Promise<Result> {
+        try {
+            const response = await this.withTimeout(
+                this.generator.textGen({prompt, max_tokens: 8, include_history: false, stop: ['\n']}),
+                CLASSIFIER_TIMEOUT_MS
+            );
+            const result = this.parseClassificationResult(response?.result);
+            console.log(`Classification result: ${response?.result} -> ${result}`);
+            return result ?? Result.None;
+        } catch (error) {
+            console.log(error);
+            return Result.None;
         }
+    }
 
-        return new Action(text, domain, difficultyRating, typeModifier, actor);
+    withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
+        return new Promise((resolve, reject) => {
+            const timer = setTimeout(() => reject(new Error(`Classifier timed out after ${timeoutMs}ms`)), timeoutMs);
+            promise.then(
+                (value) => { clearTimeout(timer); resolve(value); },
+                (error) => { clearTimeout(timer); reject(error); }
+            );
+        });
+    }
+
+    // Reduces the LLM's free-text reply to one of the strict outcome labels.
+    // Anything that doesn't clearly match falls through to null, which the
+    // caller treats as a safe no-op rather than forcing a failure.
+    parseClassificationResult(raw: string|undefined|null): Result|null {
+        if (!raw) return null;
+        const normalized = raw.trim().toLowerCase().replace(/[^a-z]/g, '');
+        if (!normalized) return null;
+
+        const critical = normalized.includes('crit');
+        if (critical && normalized.includes('fail')) return Result.CriticalFailure;
+        if (critical && (normalized.includes('success') || normalized.includes('pass'))) return Result.CriticalSuccess;
+        if (normalized.includes('fail')) return Result.Failure;
+        if (normalized.includes('success') || normalized.includes('pass')) return Result.Success;
+        if (normalized.includes('nocheck') || normalized.includes('none')) return Result.None;
+        return null;
     }
 
     // Told to the narrator when the dice are off, so it treats the message as
@@ -351,8 +379,10 @@ export class Stage extends StageBase<InitStateType, ChatStateType, MessageStateT
         } = userMessage;
 
         const errorMessage: string|null = null;
-        let takenAction: Action|null = null;
-        let finalContent: string|undefined = content;
+        // The player's original message, sent to chat untouched - the roll
+        // and its outcome are never written into the visible text or history,
+        // only into stageDirections (for the narrator) and the panel.
+        const finalContent: string|undefined = content;
 
         // Dice turned off from the panel: the message goes through untouched,
         // with no classification and so no waiting on the classifier either.
@@ -373,13 +403,9 @@ export class Stage extends StageBase<InitStateType, ChatStateType, MessageStateT
 
         if (finalContent) {
             this.addAutoPartyMembersFromText(anonymizedId, finalContent);
-            takenAction = await this.resolveAction(anonymizedId, content,
+            const outcome = await this.resolveAction(anonymizedId, content,
                 promptForId ? this.characters[promptForId]?.name ?? '' : '');
-        }
-
-        if (takenAction) {
-            this.setLastOutcome(anonymizedId, takenAction.determineSuccess());
-            finalContent = this.getUserState(anonymizedId).lastOutcome?.getDescription();
+            this.setLastOutcome(anonymizedId, outcome);
         }
 
         return {
@@ -396,17 +422,21 @@ export class Stage extends StageBase<InitStateType, ChatStateType, MessageStateT
     async afterResponse(botMessage: Message): Promise<Partial<StageResponse<ChatStateType, MessageStateType>>> {
 
         const message = botMessage.content;
+        const narratorResponse = message.split(/---|\*\*\*|```|system:/i)[0].trim();
 
         for (const user of Object.values(this.users)) {
             this.addAutoPartyMembersFromText(user.anonymizedId, message);
-            this.getUserState(user.anonymizedId).lastOutcomePrompt = '';
+            const userState = this.getUserState(user.anonymizedId);
+            userState.lastOutcomePrompt = '';
+            // Kept as context for the next action's classification prompt.
+            userState.lastNarratorResponse = narratorResponse;
         }
 
 
         return {
             stageDirections: null,
             messageState: this.buildMessageState(),
-            modifiedMessage: message.split(/---|\*\*\*|```|system:/i)[0].trim(),
+            modifiedMessage: narratorResponse,
             error: null,
             systemMessage: this.buildPartySystemMessage(),
             chatState: this.chatState
@@ -503,6 +533,7 @@ export class Stage extends StageBase<InitStateType, ChatStateType, MessageStateT
                 const lastOutcome = messageState[user.anonymizedId]?.['lastOutcome'] ?? null;
                 userState.lastOutcome = lastOutcome ? this.convertOutcome(lastOutcome) : null;
                 userState.lastOutcomePrompt = messageState[user.anonymizedId]?.['lastOutcomePrompt'] ?? '';
+                userState.lastNarratorResponse = messageState[user.anonymizedId]?.['lastNarratorResponse'] ?? '';
                 // Rewinding the chat rewinds the reminder cadence too, so a
                 // swiped-away turn doesn't leave the counter out of step.
                 userState.turnsSinceRoster = messageState[user.anonymizedId]?.['turnsSinceRoster'] ?? this.rosterInterval;
@@ -510,6 +541,7 @@ export class Stage extends StageBase<InitStateType, ChatStateType, MessageStateT
                 userState.autoParty = [];
                 userState.lastOutcome = null;
                 userState.lastOutcomePrompt = '';
+                userState.lastNarratorResponse = '';
                 userState.turnsSinceRoster = this.rosterInterval;
             }
             this.userState[user.anonymizedId] = userState;
@@ -517,11 +549,11 @@ export class Stage extends StageBase<InitStateType, ChatStateType, MessageStateT
     }
 
     convertOutcome(input: any): Outcome {
-        return new Outcome(input['dieResult1'], input['dieResult2'], this.convertAction(input['action']));
+        return new Outcome(input['roll'] ?? 0, input['result'] ?? Result.None, this.convertAction(input['action']));
     }
 
     convertAction(input: any): Action {
-        return new Action(input['description'], input['domain'] ?? null, input['difficultyModifier'] ?? 0, input['typeModifier'] ?? 0, input['actor'] ?? null);
+        return new Action(input['description'], input['actor'] ?? null);
     }
 
     buildMessageState(): any {
@@ -532,6 +564,7 @@ export class Stage extends StageBase<InitStateType, ChatStateType, MessageStateT
                 autoParty: userState.autoParty,
                 lastOutcome: userState.lastOutcome ?? null,
                 lastOutcomePrompt: userState.lastOutcomePrompt ?? '',
+                lastNarratorResponse: userState.lastNarratorResponse ?? '',
                 turnsSinceRoster: userState.turnsSinceRoster ?? 0
             };
         }
@@ -555,82 +588,6 @@ export class Stage extends StageBase<InitStateType, ChatStateType, MessageStateT
         return source.replace(/{{([A-z]*)}}/g, (match) => {
             return replacements[match.substring(2, match.length - 2)];
         });
-    }
-
-    async awaitPipeline(pipeline: string, eventId: any, timeoutMs: number = PIPELINE_TIMEOUT_MS): Promise<any> {
-        return new Promise((resolve, reject) => {
-            const url = `https://${pipeline}/${eventId}`;
-            const evtSource = new EventSource(url, {withCredentials: false});
-
-            // Without this the stream can simply never speak, leaving the
-            // caller awaiting forever. That await is inside beforePrompt, so
-            // a silent backend takes the whole chat down with it: Chub gives
-            // up on the stage and its generation fails half-built.
-            const expiry = setTimeout(() => {
-                evtSource.close();
-                reject(new Error(`Classifier timed out after ${timeoutMs}ms`));
-            }, timeoutMs);
-
-            const settle = (finish: () => void) => {
-                clearTimeout(expiry);
-                evtSource.close();
-                finish();
-            };
-
-            evtSource.onmessage = (e) => {
-                try {
-                    const data = JSON.parse(e.data);
-                    settle(() => resolve(data));
-                } catch (exception) {
-                    settle(() => reject(exception));
-                }
-            };
-
-            evtSource.addEventListener("complete", (e) => {
-                try {
-                    const data = JSON.parse((e as MessageEvent).data);
-                    settle(() => resolve(data));
-                } catch (exception) {
-                    settle(() => reject(exception));
-                }
-            });
-
-            evtSource.onerror = (e) => {
-                settle(() => reject(e));
-            };
-        });
-    }
-
-    async query(data: any) {
-        let result: any = null;
-        let retries = 3;
-        // Retries are also capped by wall clock, so three slow attempts can't
-        // add up to longer than Chub is willing to wait on the stage.
-        const deadline = Date.now() + CLASSIFIER_BUDGET_MS;
-        const pipeline = "ravenok-statosphere-backend.hf.space/gradio_api/call/predict";
-        while (retries > 0 && (!result || result.labels.length == 0) && Date.now() < deadline) {
-            try {
-                const request = await fetch(`https://${pipeline}`, {
-                    method: "POST",
-                    headers: {
-                        "Content-Type": "application/json"
-                    },
-                    body: JSON.stringify({data: [JSON.stringify(data)]}),
-                    credentials: "omit"
-                });
-
-                const { event_id } = await request.json();
-                const response = await this.awaitPipeline(pipeline, event_id,
-                    Math.max(deadline - Date.now(), 1000));
-                result = JSON.parse(response[0]);
-            } catch (error) {
-                console.log(error);
-                retries--;
-            }
-        }
-
-        console.log(result);
-        return result;
     }
 
     render(): ReactElement {

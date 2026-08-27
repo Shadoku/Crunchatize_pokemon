@@ -638,6 +638,64 @@ $type-colors: (
   &:last-child.is-active { background-color: $accent-do; }
 }
 
+// The result of the player's last dice check. Panel-only - the roll and its
+// qualitative outcome never appear in chat or chat history.
+.crunchatize-lastroll {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  padding: 0.5rem;
+  background-color: $surface-raised;
+  border: 1px solid $line;
+  border-left: 3px solid $ink-dim;
+  border-radius: 0.45rem;
+}
+
+.crunchatize-lastroll-label {
+  font-size: 0.8rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: $ink-dim;
+}
+
+.crunchatize-lastroll-roll {
+  font-size: 0.85rem;
+  color: $ink-dim;
+}
+
+.crunchatize-lastroll-result {
+  font-size: 0.85rem;
+  font-weight: 700;
+  margin-left: auto;
+}
+
+.crunchatize-lastroll-critical-failure {
+  border-left-color: #e0525a;
+  .crunchatize-lastroll-result { color: #e0525a; }
+}
+
+.crunchatize-lastroll-failure {
+  border-left-color: #e0836a;
+  .crunchatize-lastroll-result { color: #e0836a; }
+}
+
+.crunchatize-lastroll-success {
+  border-left-color: $accent-say;
+  .crunchatize-lastroll-result { color: $accent-say; }
+}
+
+.crunchatize-lastroll-critical-success {
+  border-left-color: #b9f2ff;
+  .crunchatize-lastroll-result { color: #b9f2ff; }
+}
+
+.crunchatize-lastroll-none {
+  border-left-color: $ink-dim;
+  .crunchatize-lastroll-result { color: $ink-dim; }
+}
+
 .crunchatize-bag-copied {
   display: flex;
   flex-direction: column;
