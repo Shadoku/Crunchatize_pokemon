@@ -1200,3 +1200,10 @@ $type-colors: (
   color: $ink-dim;
   &:not(:disabled):hover { color: #ff8a8a; border-color: #ff8a8a; }
 }
+
+// What the last scan did. "Nothing new found" is a real answer, so it needs
+// to be as visible as a list of findings would have been.
+.crunchatize-scan-status {
+  font-size: 0.76rem;
+  color: $ink-dim;
+}

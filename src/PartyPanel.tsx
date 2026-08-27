@@ -1,5 +1,5 @@
 import {ReactElement, useEffect, useState} from "react";
-import type {Stage} from "./Stage";
+import type {Stage, ScanOutcome} from "./Stage";
 import {speciesNames, getSpecies, speciesImageUrl} from "./Lore";
 import {anchorFor, onAnchorsLoaded} from "./Portrait";
 import {PartyMember, PartyMemberDetails, DEFAULT_DETAILS, detailsOf, displayNameOf, Condition} from "./Party";
@@ -379,6 +379,10 @@ function SuggestionsPanel({stage, anonymizedId, refresh}: {
     refresh: () => void;
 }): ReactElement {
     const [busy, setBusy] = useState(false);
+    // What the last scan actually did. Without this a scan that found nothing
+    // and a scan that never ran look identical - which is how a silent
+    // early-return went unnoticed until someone reported a dead button.
+    const [status, setStatus] = useState<string | null>(null);
 
     // A scan is fired and forgotten, so its findings arrive with nothing
     // awaiting them - the panel subscribes and re-renders when they land.
@@ -398,6 +402,19 @@ function SuggestionsPanel({stage, anonymizedId, refresh}: {
         }
     }
 
+    async function scan() {
+        if (busy) return;
+        setBusy(true);
+        setStatus(null);
+        try {
+            const outcome = await stage.runScan(anonymizedId);
+            setStatus(describeScan(outcome));
+        } finally {
+            setBusy(false);
+            refresh();
+        }
+    }
+
     return (
         <div className="crunchatize-suggestions">
             <div className="crunchatize-suggestions-header">
@@ -409,9 +426,10 @@ function SuggestionsPanel({stage, anonymizedId, refresh}: {
                     className="crunchatize-scan-button"
                     disabled={scanning || busy}
                     title="Look over the recent story for changes to your party, threads, characters and scene"
-                    onClick={() => act(() => stage.runScan(anonymizedId))}
+                    onClick={scan}
                 >{scanning ? 'Scanning…' : 'Scan now'}</button>
             </div>
+            {status && <div className="crunchatize-scan-status">{status}</div>}
             {suggestions.length > 0 && (
                 <ul className="crunchatize-suggestion-list">
                     {suggestions.map(suggestion => (
@@ -440,6 +458,15 @@ function SuggestionsPanel({stage, anonymizedId, refresh}: {
             )}
         </div>
     );
+}
+
+// What to tell the player a scan did. "Nothing new" is a real, useful answer
+// here, and has to be distinguishable from a scan that failed outright.
+function describeScan(outcome: ScanOutcome): string {
+    if (outcome.reason === 'busy') return 'Already scanning…';
+    if (!outcome.ok) return 'Scan failed - try again.';
+    if (outcome.found === 0) return 'Nothing new found.';
+    return outcome.found === 1 ? 'Found 1 change.' : `Found ${outcome.found} changes.`;
 }
 
 // Short chips, so the row reads as "PARTY  Growlithe joins the party".

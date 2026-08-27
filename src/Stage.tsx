@@ -51,11 +51,11 @@ interface UserState {
     // running consequence of play, so a swipe should rewind it along with
     // the story rather than carry it into a branch where it never happened.
     partyStatus: {[speciesLower: string]: Condition};
-    // Prompts since the story was last scanned, and the story itself since
-    // then. Both are message state: the buffer is the narrative, and the
-    // cadence should rewind with it, exactly like turnsSinceRoster.
+    // Prompts since the story was last scanned. Message state, so the cadence
+    // rewinds with the story exactly like turnsSinceRoster. Written from
+    // inside afterResponse, which is the only place message state can be
+    // written from - see runScan for what happened when that was forgotten.
     turnsSinceScan: number;
-    narrationBuffer: string;
 }
 
 // How many prompts pass between roster reminders. The roster is reference
@@ -105,9 +105,12 @@ const SCAN_MAX_TOKENS = 256;
 // again.
 const DISMISSAL_LIFETIME_SCANS = 5;
 
-// How much recent story the scan reads. Trimmed from the front, so a long
-// stretch between scans keeps the most recent turns rather than the oldest.
-const MAX_BUFFER_CHARS = 4000;
+// What a scan did, so the panel can tell "found nothing" from "never ran".
+export interface ScanOutcome {
+    ok: boolean;
+    found: number;
+    reason?: 'busy' | 'failed';
+}
 
 // Chat-wide (not tied to a branch) record of what the player has set up by
 // hand in the panel: their explicit party edits, and their bag. Both are
@@ -211,13 +214,17 @@ export class Stage extends StageBase<InitStateType, ChatStateType, MessageStateT
             partyStatus: {},
             // Unlike the roster reminder, this starts at zero rather than
             // due: there's no story to scan yet on the first turn.
-            turnsSinceScan: 0,
-            narrationBuffer: ''
+            turnsSinceScan: 0
         }
     }
 
+    // Stores the fallback rather than handing back a throwaway: callers mutate
+    // what they get back, and an unstored object silently swallows the write.
     getUserState(anonymizedId: string): UserState {
-        return this.userState[anonymizedId] ?? this.initializeUserState();
+        if (!this.userState[anonymizedId]) {
+            this.userState[anonymizedId] = this.initializeUserState();
+        }
+        return this.userState[anonymizedId];
     }
 
     // Any moemon character card already in the chat counts as a party member.
@@ -523,34 +530,21 @@ export class Stage extends StageBase<InitStateType, ChatStateType, MessageStateT
         return Number.isFinite(count) ? count : 0;
     }
 
-    // Keeps the tail of the story since the last scan. Trimmed from the
-    // front, so a long gap keeps the most recent turns rather than the
-    // oldest ones.
-    appendNarration(anonymizedId: string, speaker: string, text: string): void {
-        const trimmed = text.trim();
-        if (!trimmed) return;
-        const userState = this.getUserState(anonymizedId);
-        const appended = `${userState.narrationBuffer}\n${speaker}: ${trimmed}`.trim();
-        userState.narrationBuffer = appended.length > MAX_BUFFER_CHARS
-            ? appended.slice(appended.length - MAX_BUFFER_CHARS)
-            : appended;
-    }
-
     buildScanPrompt(anonymizedId: string): string {
         // buildContextNote already says exactly what's tracked - roster,
         // scene, open threads, characters - so the scan tells the model what
-        // it already knows in the same words the narrator gets.
+        // it already knows in the same words the narrator gets. The story
+        // itself comes from include_history rather than from anything the
+        // stage keeps: a buffer of its own could only be written from inside
+        // a lifecycle hook, so it was empty in exactly the case that matters
+        // most - a chat opened fresh, before the player has said anything.
         const tracked = this.buildContextNote(anonymizedId);
-        const story = this.getUserState(anonymizedId).narrationBuffer;
 
         return [
-            `You are reviewing a stretch of a Pokémon-style roleplay to spot what has changed.`,
+            `You are reviewing the roleplay above to spot what has changed.`,
             ``,
             `Already tracked:`,
             tracked || '(nothing yet)',
-            ``,
-            `Recent story:`,
-            story,
             ``,
             `Report only what is NEW or CHANGED versus what is already tracked.`,
             `Write one finding per line, in exactly these forms:`,
@@ -668,10 +662,12 @@ export class Stage extends StageBase<InitStateType, ChatStateType, MessageStateT
     // Runs a scan. Never awaited by a lifecycle hook: the caller fires it and
     // the panel picks the findings up through onSuggestionsChanged, so the
     // chat never waits on the model here.
-    async runScan(anonymizedId: string): Promise<void> {
-        if (this.isScanning) return;
-        const userState = this.getUserState(anonymizedId);
-        if (!userState.narrationBuffer.trim()) return;
+    //
+    // Reports what happened rather than returning void. A scan that finds
+    // nothing and a scan that never ran look identical from the panel
+    // otherwise, which is precisely how this went unnoticed the first time.
+    async runScan(anonymizedId: string): Promise<ScanOutcome> {
+        if (this.isScanning) return {ok: false, found: 0, reason: 'busy'};
 
         this.isScanning = true;
         this.notifySuggestionsChanged();
@@ -680,14 +676,18 @@ export class Stage extends StageBase<InitStateType, ChatStateType, MessageStateT
                 this.generator.textGen({
                     prompt: this.buildScanPrompt(anonymizedId),
                     max_tokens: SCAN_MAX_TOKENS,
-                    include_history: false
+                    // The platform supplies the story; the stage cannot keep
+                    // its own copy across a reload (see buildScanPrompt).
+                    include_history: true
                 }),
                 SCAN_TIMEOUT_MS
             );
 
-            // textGen resolves null on failure rather than throwing, so an
-            // empty result is an ordinary outcome, not an error.
-            const found = this.filterDetections(anonymizedId, parseScanOutput(response?.result));
+            // textGen resolves null on failure rather than throwing, so tell
+            // a dead generation apart from one that simply found nothing.
+            if (response?.result == null) return {ok: false, found: 0, reason: 'failed'};
+
+            const found = this.filterDetections(anonymizedId, parseScanOutput(response.result));
 
             // Read through patchChatState rather than a snapshot taken before
             // the await: a panel edit made while the scan was in flight is
@@ -701,10 +701,10 @@ export class Stage extends StageBase<InitStateType, ChatStateType, MessageStateT
                     .filter(dismissal => this.getScanCount(anonymizedId) - dismissal.scan < DISMISSAL_LIFETIME_SCANS),
                 scanCount: this.getScanCount(anonymizedId) + 1
             });
-            // The buffer has been read; the next scan starts from here.
-            this.getUserState(anonymizedId).narrationBuffer = '';
+            return {ok: true, found: found.length};
         } catch (error) {
             console.log(error);
+            return {ok: false, found: 0, reason: 'failed'};
         } finally {
             this.isScanning = false;
             this.notifySuggestionsChanged();
@@ -815,10 +815,6 @@ export class Stage extends StageBase<InitStateType, ChatStateType, MessageStateT
             initState: null,
             chatState: this.chatState,
         };
-    }
-
-    async setState(state: MessageStateType): Promise<void> {
-        this.setStateFromMessageState(state);
     }
 
     // Resolves a line of action: rolls a d20 and asks the platform's own LLM
@@ -955,7 +951,54 @@ export class Stage extends StageBase<InitStateType, ChatStateType, MessageStateT
         return `\n[INST]${prompt}\n[/INST]${this.rosterNoteIfDue(anonymizedId)}`;
     }
 
+    // The runtime answers the host's BEFORE/AFTER/SET message with whatever
+    // these hooks return - but if one throws, it posts an ERROR and never
+    // sends that answer at all. The host then waits, times out, and force
+    // refreshes the frame, which comes back with a null stage that silently
+    // drops every message after it. So a hook must always return something,
+    // however little it managed to do: degrading costs a turn's worth of
+    // stage behaviour, while throwing costs the whole chat.
     async beforePrompt(userMessage: Message): Promise<Partial<StageResponse<ChatStateType, MessageStateType>>> {
+        try {
+            return await this.beforePromptInner(userMessage);
+        } catch (error) {
+            console.error('Crunchatize: beforePrompt failed', error);
+            return this.safeResponse(userMessage.content);
+        }
+    }
+
+    async afterResponse(botMessage: Message): Promise<Partial<StageResponse<ChatStateType, MessageStateType>>> {
+        try {
+            return await this.afterResponseInner(botMessage);
+        } catch (error) {
+            console.error('Crunchatize: afterResponse failed', error);
+            return this.safeResponse(botMessage.content);
+        }
+    }
+
+    async setState(state: MessageStateType): Promise<void> {
+        try {
+            this.setStateFromMessageState(state);
+        } catch (error) {
+            console.error('Crunchatize: setState failed', error);
+        }
+    }
+
+    // A response that leaves the message exactly as it was and adds nothing.
+    // Deliberately omits messageState and chatState: state that may be
+    // half-written is better left alone than written back malformed.
+    safeResponse(content: string|undefined): Partial<StageResponse<ChatStateType, MessageStateType>> {
+        return {
+            stageDirections: null,
+            messageState: null,
+            modifiedMessage: content,
+            systemMessage: null,
+            error: null,
+            chatState: null
+        };
+    }
+
+    async beforePromptInner(userMessage: Message): Promise<Partial<StageResponse<ChatStateType, MessageStateType>>> {
         const {
             anonymizedId,
             content,
@@ -967,10 +1010,6 @@ export class Stage extends StageBase<InitStateType, ChatStateType, MessageStateT
         // and its outcome are never written into the visible text or history,
         // only into stageDirections (for the narrator) and the panel.
         const finalContent: string|undefined = content;
-
-        // Recorded whether or not the dice are involved: what the player did
-        // is as much a part of what the scanner reads as the reply to it.
-        if (finalContent) this.appendNarration(anonymizedId, 'Player', finalContent);
 
         // Dice turned off from the panel: the message goes through untouched,
         // with no classification and so no waiting on the classifier either.
@@ -1007,7 +1046,7 @@ export class Stage extends StageBase<InitStateType, ChatStateType, MessageStateT
         };
     }
 
-    async afterResponse(botMessage: Message): Promise<Partial<StageResponse<ChatStateType, MessageStateType>>> {
+    async afterResponseInner(botMessage: Message): Promise<Partial<StageResponse<ChatStateType, MessageStateType>>> {
 
         const message = botMessage.content;
         const narratorResponse = message.split(/---|\*\*\*|```|system:/i)[0].trim();
@@ -1019,7 +1058,6 @@ export class Stage extends StageBase<InitStateType, ChatStateType, MessageStateT
             userState.lastOutcomePrompt = '';
             // Kept as context for the next action's classification prompt.
             userState.lastNarratorResponse = narratorResponse;
-            this.appendNarration(user.anonymizedId, 'Story', narratorResponse);
 
             if (this.scanInterval > 0) {
                 userState.turnsSinceScan = (userState.turnsSinceScan ?? 0) + 1;
@@ -1176,7 +1214,6 @@ export class Stage extends StageBase<InitStateType, ChatStateType, MessageStateT
                 userState.turnsSinceRoster = messageState[user.anonymizedId]?.['turnsSinceRoster'] ?? this.rosterInterval;
                 userState.partyStatus = this.parsePartyStatus(messageState[user.anonymizedId]?.['partyStatus']);
                 userState.turnsSinceScan = messageState[user.anonymizedId]?.['turnsSinceScan'] ?? 0;
-                userState.narrationBuffer = messageState[user.anonymizedId]?.['narrationBuffer'] ?? '';
             } else {
                 userState.autoParty = [];
                 userState.lastOutcome = null;
@@ -1185,7 +1222,6 @@ export class Stage extends StageBase<InitStateType, ChatStateType, MessageStateT
                 userState.turnsSinceRoster = this.rosterInterval;
                 userState.partyStatus = {};
                 userState.turnsSinceScan = 0;
-                userState.narrationBuffer = '';
             }
             this.userState[user.anonymizedId] = userState;
         }
@@ -1225,8 +1261,7 @@ export class Stage extends StageBase<InitStateType, ChatStateType, MessageStateT
                 lastNarratorResponse: userState.lastNarratorResponse ?? '',
                 turnsSinceRoster: userState.turnsSinceRoster ?? 0,
                 partyStatus: userState.partyStatus ?? {},
-                turnsSinceScan: userState.turnsSinceScan ?? 0,
-                narrationBuffer: userState.narrationBuffer ?? ''
+                turnsSinceScan: userState.turnsSinceScan ?? 0
             };
         }
         return messageState;

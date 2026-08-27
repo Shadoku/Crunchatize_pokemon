@@ -60,6 +60,9 @@ to pick up where you left off.
 I've tagged the stage NSFW, but there isn't anything in the stage that would render a wholesome chat inappropriate. However, my example bot is NSFW, and I'm sure other bots that attach this stage could be, too.
 <br><br>
 **Updates:**<br>
+08/27/2026 - Fixed Scan now doing nothing. The scan was reading a copy of the story the stage kept for itself, which was empty on any chat
+opened fresh - so the button quietly did nothing at all. It now asks the platform for the chat history instead, works on the first click,
+and tells you what it did rather than leaving you guessing between 'found nothing' and 'broken'.<br>
 08/27/2026 - The stage now scans the recent story every ten messages (configurable, or on demand with Scan now) for party, thread,
 character and scene changes you haven't recorded, and offers what it finds as suggestions to accept or reject rather than merging them
 itself. The scan runs in the background, so the chat never waits on it, and turning a suggestion down keeps it from being raised again
