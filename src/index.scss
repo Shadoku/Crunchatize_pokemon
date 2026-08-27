@@ -1104,3 +1104,99 @@ $type-colors: (
 
   &.is-error { color: #e0836a; }
 }
+
+// Scanner findings, at the top of each player's block.
+.crunchatize-suggestions {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.crunchatize-suggestions-header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+
+  .crunchatize-bag-title { flex: 1; min-width: 0; }
+}
+
+.crunchatize-scan-button {
+  flex-shrink: 0;
+  font: inherit;
+  font-size: 0.75rem;
+  font-weight: 600;
+  cursor: pointer;
+  color: $ink-dim;
+  background-color: $surface-raised;
+  border: 1px solid $line;
+  border-radius: 0.35rem;
+  padding: 0.2rem 0.5rem;
+
+  &:not(:disabled):hover { color: $ink; border-color: $ink-dim; }
+  &:disabled { cursor: default; opacity: 0.55; }
+}
+
+.crunchatize-suggestion-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+
+.crunchatize-suggestion {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  background-color: $surface-raised;
+  // Picked out from the tracked lists below it: this row is a question, not
+  // a record.
+  border: 1px solid rgba(240, 166, 90, 0.45);
+  border-radius: 0.4rem;
+  padding: 0.35rem 0.45rem;
+}
+
+.crunchatize-suggestion-kind {
+  flex-shrink: 0;
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: $accent-do;
+  background-color: rgba(240, 166, 90, 0.15);
+  border-radius: 0.25rem;
+  padding: 0.1rem 0.3rem;
+}
+
+.crunchatize-suggestion-text {
+  flex: 1;
+  min-width: 0;
+  font-size: 0.82rem;
+  overflow-wrap: anywhere;
+}
+
+.crunchatize-suggestion-accept,
+.crunchatize-suggestion-reject {
+  flex-shrink: 0;
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.85rem;
+  line-height: 1;
+  background: none;
+  border: 1px solid $line;
+  border-radius: 0.3rem;
+  padding: 0.15rem 0.4rem;
+
+  &:disabled { cursor: default; opacity: 0.4; }
+}
+
+.crunchatize-suggestion-accept {
+  color: $accent-say;
+  &:not(:disabled):hover { border-color: $accent-say; background-color: rgba(111, 211, 166, 0.12); }
+}
+
+.crunchatize-suggestion-reject {
+  color: $ink-dim;
+  &:not(:disabled):hover { color: #ff8a8a; border-color: #ff8a8a; }
+}

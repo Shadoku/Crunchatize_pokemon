@@ -46,6 +46,13 @@ critical success pulls her back up one. It feeds into how later checks are judge
 set it by hand from the panel if the narration says otherwise. Whatever a moemon is holding is now told to the judge too, so a held item can
 actually matter to a roll instead of being decoration.
 <br><br>
+**It keeps up on its own**<br>
+Every ten messages (configurable, or off), the stage quietly reads back over what's happened and looks for things worth tracking that you
+haven't written down: a moemon that joined, a goal you picked up, a name that keeps coming back, a change of scene. It never just merges
+what it finds - guessing from prose gets things wrong, which is why the panel has manual controls in the first place - so each finding
+turns up at the top of the panel as a suggestion with a tick and a cross. There's a Scan now button if you'd rather ask for it directly.
+The scan runs in the background, so nothing waits on it; suggestions simply appear when they're ready.
+<br><br>
 **Carrying a party between chats**<br>
 The panel's "Save data" section exports your roster, bag, threads, characters and scene as a block of text you can paste into another chat
 to pick up where you left off.
@@ -53,6 +60,10 @@ to pick up where you left off.
 I've tagged the stage NSFW, but there isn't anything in the stage that would render a wholesome chat inappropriate. However, my example bot is NSFW, and I'm sure other bots that attach this stage could be, too.
 <br><br>
 **Updates:**<br>
+08/27/2026 - The stage now scans the recent story every ten messages (configurable, or on demand with Scan now) for party, thread,
+character and scene changes you haven't recorded, and offers what it finds as suggestions to accept or reject rather than merging them
+itself. The scan runs in the background, so the chat never waits on it, and turning a suggestion down keeps it from being raised again
+for a while.<br>
 08/27/2026 - Added condition tracking (a critical result knocks a moemon down or picks her back up), and started telling the judge what a
 moemon is holding. The panel now also tracks open plot threads, recurring characters and how they feel about you, and the current scene -
 all folded into the existing roster reminder. Added export/import, so a party can move between chats.<br>
@@ -121,6 +132,15 @@ config_schema:
         this is what the bot actually sees. Set to 0 to never remind it.
       type: integer
       default: 6
+    scanInterval:
+      title: Story Scan Interval
+      description: >-
+        How many messages pass between scans of the recent story for changes to
+        your party, threads, characters and scene. Anything found is offered in
+        the panel as a suggestion to accept or reject, never applied on its own.
+        Set to 0 to only scan when you press Scan now.
+      type: integer
+      default: 10
 
 # The schema of the state that you store.
 # This isn't needed even if you do store state,

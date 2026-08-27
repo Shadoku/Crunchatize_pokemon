@@ -12,6 +12,11 @@ import {defaultDetailsFor} from "./Moveset";
 import {InventoryItem, parseInventory, sameItem} from "./Inventory";
 import {QuestEntry, parseQuests, newQuestId} from "./Quest";
 import {NpcEntry, parseNpcs, clampAffinity, sameNpc, describeAffinity, findNpcMentions} from "./Npc";
+import {
+    Suggestion, Dismissal, RawDetection, SuggestionKind,
+    parseScanOutput, parseSuggestions, parseDismissals,
+    suggestionKey, describeSuggestion, newSuggestionId
+} from "./Scan";
 import {PartyPanel} from "./PartyPanel";
 
 type MessageStateType = any;
@@ -46,6 +51,11 @@ interface UserState {
     // running consequence of play, so a swipe should rewind it along with
     // the story rather than carry it into a branch where it never happened.
     partyStatus: {[speciesLower: string]: Condition};
+    // Prompts since the story was last scanned, and the story itself since
+    // then. Both are message state: the buffer is the narrative, and the
+    // cadence should rewind with it, exactly like turnsSinceRoster.
+    turnsSinceScan: number;
+    narrationBuffer: string;
 }
 
 // How many prompts pass between roster reminders. The roster is reference
@@ -77,6 +87,28 @@ const MAX_NPCS_IN_NOTE = 6;
 // would branch on to migrate an older save instead of rejecting it.
 const SAVE_VERSION = 1;
 
+// How many prompts pass between story scans, when the player hasn't said.
+const DEFAULT_SCAN_INTERVAL = 10;
+
+// The scan blocks nothing - it's fired and forgotten, and its findings land
+// in the panel whenever they arrive - so it can afford to be far more patient
+// than the classifier, which runs inside a hook Chub is waiting on.
+const SCAN_TIMEOUT_MS = 30000;
+
+// Room for a dozen one-line detections and no more; the scan is meant to
+// report, not narrate.
+const SCAN_MAX_TOKENS = 256;
+
+// How many scans a rejection is remembered for. At the default interval
+// that's roughly fifty turns - long enough that a wrong guess stops nagging,
+// short enough that a story genuinely insisting on something can raise it
+// again.
+const DISMISSAL_LIFETIME_SCANS = 5;
+
+// How much recent story the scan reads. Trimmed from the front, so a long
+// stretch between scans keeps the most recent turns rather than the oldest.
+const MAX_BUFFER_CHARS = 4000;
+
 // Chat-wide (not tied to a branch) record of what the player has set up by
 // hand in the panel: their explicit party edits, and their bag. Both are
 // edited outside the normal lifecycle hooks, so they're persisted straight
@@ -94,6 +126,15 @@ interface ChatPartyState {
     // Where and when the scene is taking place. Shared by everyone in the
     // chat - see setEnvironment for why it's stored per-user anyway.
     environment: string;
+    // What the scanner found and the player hasn't ruled on, and what they
+    // already turned down. Chat-wide: a pending decision shouldn't evaporate
+    // because a reply was swiped away, and a rejection has to outlive the
+    // branch it was made on to be worth remembering at all.
+    suggestions: Suggestion[];
+    dismissals: Dismissal[];
+    // Completed scans, counting up. Dismissals are stamped with it to expire
+    // against, so unlike the per-branch cadence counter it must never rewind.
+    scanCount: number;
 }
 
 const EMPTY_CHAT_STATE: ChatPartyState = {
@@ -102,7 +143,10 @@ const EMPTY_CHAT_STATE: ChatPartyState = {
     rollEnabled: true,
     quests: [],
     npcs: [],
-    environment: ''
+    environment: '',
+    suggestions: [],
+    dismissals: [],
+    scanCount: 0
 };
 
 export class Stage extends StageBase<InitStateType, ChatStateType, MessageStateType, ConfigType> {
@@ -118,6 +162,17 @@ export class Stage extends StageBase<InitStateType, ChatStateType, MessageStateT
     characters: {[key: string]: Character} = {};
     globalModifier: number;
     rosterInterval: number;
+    scanInterval: number;
+
+    // A scan is fired and forgotten, so the panel has no call to await; it
+    // subscribes instead and re-renders when findings land. Same shape as
+    // Portrait.ts's onAnchorsLoaded, for the same reason - data that arrives
+    // after the render that wanted it.
+    scanListeners: Set<() => void> = new Set();
+    // Guards against a second scan starting on top of one in flight (the
+    // player pressing Scan now while the interval scan is still out), and
+    // drives the button's own disabled state.
+    isScanning: boolean = false;
 
 
 
@@ -134,6 +189,7 @@ export class Stage extends StageBase<InitStateType, ChatStateType, MessageStateT
         this.characters = characters;
         this.globalModifier = config?.difficultyModifier ?? 0;
         this.rosterInterval = Math.max(config?.rosterReminderInterval ?? DEFAULT_ROSTER_INTERVAL, 0);
+        this.scanInterval = Math.max(config?.scanInterval ?? DEFAULT_SCAN_INTERVAL, 0);
         this.chatState = chatState ?? {};
 
         for (const user of Object.values(this.users)) {
@@ -152,7 +208,11 @@ export class Stage extends StageBase<InitStateType, ChatStateType, MessageStateT
             // Starts due, so the LLM gets the roster on the first prompt
             // rather than only after a full interval has gone by.
             turnsSinceRoster: this.rosterInterval,
-            partyStatus: {}
+            partyStatus: {},
+            // Unlike the roster reminder, this starts at zero rather than
+            // due: there's no story to scan yet on the first turn.
+            turnsSinceScan: 0,
+            narrationBuffer: ''
         }
     }
 
@@ -433,6 +493,281 @@ export class Stage extends StageBase<InitStateType, ChatStateType, MessageStateT
         }
     }
 
+    // ---- Story scanner -------------------------------------------------
+    //
+    // Reads the stretch of story since the last scan against what's already
+    // tracked, and offers what it finds as suggestions. Nothing it detects is
+    // applied on its own: the existing party auto-detection already shows
+    // that guessing from prose gets things wrong, which is why the panel has
+    // manual add/remove in the first place.
+
+    onSuggestionsChanged(listener: () => void): () => void {
+        this.scanListeners.add(listener);
+        return () => this.scanListeners.delete(listener);
+    }
+
+    notifySuggestionsChanged(): void {
+        this.scanListeners.forEach(listener => listener());
+    }
+
+    getSuggestions(anonymizedId: string): Suggestion[] {
+        return parseSuggestions(this.chatState[anonymizedId]?.suggestions);
+    }
+
+    getDismissals(anonymizedId: string): Dismissal[] {
+        return parseDismissals(this.chatState[anonymizedId]?.dismissals);
+    }
+
+    getScanCount(anonymizedId: string): number {
+        const count = Number(this.chatState[anonymizedId]?.scanCount);
+        return Number.isFinite(count) ? count : 0;
+    }
+
+    // Keeps the tail of the story since the last scan. Trimmed from the
+    // front, so a long gap keeps the most recent turns rather than the
+    // oldest ones.
+    appendNarration(anonymizedId: string, speaker: string, text: string): void {
+        const trimmed = text.trim();
+        if (!trimmed) return;
+        const userState = this.getUserState(anonymizedId);
+        const appended = `${userState.narrationBuffer}\n${speaker}: ${trimmed}`.trim();
+        userState.narrationBuffer = appended.length > MAX_BUFFER_CHARS
+            ? appended.slice(appended.length - MAX_BUFFER_CHARS)
+            : appended;
+    }
+
+    buildScanPrompt(anonymizedId: string): string {
+        // buildContextNote already says exactly what's tracked - roster,
+        // scene, open threads, characters - so the scan tells the model what
+        // it already knows in the same words the narrator gets.
+        const tracked = this.buildContextNote(anonymizedId);
+        const story = this.getUserState(anonymizedId).narrationBuffer;
+
+        return [
+            `You are reviewing a stretch of a Pokémon-style roleplay to spot what has changed.`,
+            ``,
+            `Already tracked:`,
+            tracked || '(nothing yet)',
+            ``,
+            `Recent story:`,
+            story,
+            ``,
+            `Report only what is NEW or CHANGED versus what is already tracked.`,
+            `Write one finding per line, in exactly these forms:`,
+            `PARTY | <species>`,
+            `QUEST | <short description of a new goal or open thread>`,
+            `RESOLVED | <the tracked thread that is now finished>`,
+            `NPC | <name> | <who they are, briefly>`,
+            `SCENE | <where and when the scene now is>`,
+            `CONDITION | <species> | <ok, hurt, or fainted>`,
+            ``,
+            `Write NONE if nothing has changed. Write no other text.`
+        ].join('\n');
+    }
+
+    // Turns raw detections into suggestions worth showing: each is checked
+    // against the lorebook, against what's already true, against what's
+    // already pending, and against what the player has recently refused.
+    filterDetections(anonymizedId: string, detections: RawDetection[]): Suggestion[] {
+        const party = this.getFullParty(anonymizedId);
+        const quests = this.getQuests(anonymizedId);
+        const npcs = this.getNpcs(anonymizedId);
+        const environment = this.getEnvironment();
+        const pending = this.getSuggestions(anonymizedId);
+        const scanCount = this.getScanCount(anonymizedId);
+
+        // Only rejections still inside their lifetime suppress anything.
+        const suppressed = new Set(this.getDismissals(anonymizedId)
+            .filter(dismissal => scanCount - dismissal.scan < DISMISSAL_LIFETIME_SCANS)
+            .map(dismissal => dismissal.key));
+
+        const normalize = (text: string) => text.trim().toLowerCase().replace(/\s+/g, ' ');
+        const accepted: Suggestion[] = [];
+        const taken = new Set(pending.map(item => suggestionKey(item.kind, item.value)));
+
+        for (const detection of detections) {
+            const resolved = this.resolveDetection(anonymizedId, detection, {party, quests, npcs, environment, normalize});
+            if (!resolved) continue;
+
+            const key = suggestionKey(resolved.kind, resolved.value);
+            if (suppressed.has(key) || taken.has(key)) continue;
+            taken.add(key);
+
+            accepted.push({
+                id: newSuggestionId(),
+                kind: resolved.kind,
+                value: resolved.value,
+                detail: resolved.detail,
+                description: describeSuggestion(resolved.kind, resolved.value, resolved.detail)
+            });
+        }
+        return accepted;
+    }
+
+    // Validates one detection and canonicalises it, or returns null if it's
+    // unrecognisable or already true. Split out from filterDetections so the
+    // per-kind rules read as a list rather than as nesting.
+    resolveDetection(
+        anonymizedId: string,
+        detection: RawDetection,
+        context: {
+            party: PartyMember[];
+            quests: QuestEntry[];
+            npcs: NpcEntry[];
+            environment: string;
+            normalize: (text: string) => string;
+        }
+    ): RawDetection | null {
+        const {party, quests, npcs, environment, normalize} = context;
+
+        switch (detection.kind) {
+            case 'party': {
+                // The lorebook is the authority on what's a moemon, the same
+                // rule parseParty applies to an imported roster.
+                const info = getSpecies(detection.value);
+                if (!info) return null;
+                if (party.some(member => member.species.toLowerCase() === info.name.toLowerCase())) return null;
+                return {kind: 'party', value: info.name, detail: ''};
+            }
+            case 'quest': {
+                if (quests.some(quest => normalize(quest.text) === normalize(detection.value))) return null;
+                return {kind: 'quest', value: detection.value, detail: ''};
+            }
+            case 'quest-done': {
+                // Has to name a thread that's actually open; the id travels
+                // in detail so accepting doesn't have to match text again.
+                const match = quests.find(quest => !quest.done
+                    && (normalize(quest.text) === normalize(detection.value)
+                        || normalize(quest.text).includes(normalize(detection.value))
+                        || normalize(detection.value).includes(normalize(quest.text))));
+                if (!match) return null;
+                return {kind: 'quest-done', value: match.text, detail: match.id};
+            }
+            case 'npc': {
+                if (npcs.some(npc => sameNpc(npc.name, detection.value))) return null;
+                return {kind: 'npc', value: detection.value, detail: detection.detail};
+            }
+            case 'scene': {
+                if (normalize(environment) === normalize(detection.value)) return null;
+                return {kind: 'scene', value: detection.value, detail: ''};
+            }
+            case 'condition': {
+                const info = getSpecies(detection.value);
+                if (!info) return null;
+                if (!party.some(member => member.species.toLowerCase() === info.name.toLowerCase())) return null;
+                const condition = detection.detail.trim().toLowerCase();
+                if (condition !== 'ok' && condition !== 'hurt' && condition !== 'fainted') return null;
+                if (this.getCondition(anonymizedId, info.name) === condition) return null;
+                return {kind: 'condition', value: info.name, detail: condition};
+            }
+            default:
+                return null;
+        }
+    }
+
+    // Runs a scan. Never awaited by a lifecycle hook: the caller fires it and
+    // the panel picks the findings up through onSuggestionsChanged, so the
+    // chat never waits on the model here.
+    async runScan(anonymizedId: string): Promise<void> {
+        if (this.isScanning) return;
+        const userState = this.getUserState(anonymizedId);
+        if (!userState.narrationBuffer.trim()) return;
+
+        this.isScanning = true;
+        this.notifySuggestionsChanged();
+        try {
+            const response = await this.withTimeout(
+                this.generator.textGen({
+                    prompt: this.buildScanPrompt(anonymizedId),
+                    max_tokens: SCAN_MAX_TOKENS,
+                    include_history: false
+                }),
+                SCAN_TIMEOUT_MS
+            );
+
+            // textGen resolves null on failure rather than throwing, so an
+            // empty result is an ordinary outcome, not an error.
+            const found = this.filterDetections(anonymizedId, parseScanOutput(response?.result));
+
+            // Read through patchChatState rather than a snapshot taken before
+            // the await: a panel edit made while the scan was in flight is
+            // already in this.chatState, and writing back a stale copy would
+            // silently drop it.
+            await this.patchChatState(anonymizedId, {
+                suggestions: [...this.getSuggestions(anonymizedId), ...found],
+                // Expired rejections are pruned here rather than accumulating
+                // for the life of the chat.
+                dismissals: this.getDismissals(anonymizedId)
+                    .filter(dismissal => this.getScanCount(anonymizedId) - dismissal.scan < DISMISSAL_LIFETIME_SCANS),
+                scanCount: this.getScanCount(anonymizedId) + 1
+            });
+            // The buffer has been read; the next scan starts from here.
+            this.getUserState(anonymizedId).narrationBuffer = '';
+        } catch (error) {
+            console.log(error);
+        } finally {
+            this.isScanning = false;
+            this.notifySuggestionsChanged();
+        }
+    }
+
+    async acceptSuggestion(anonymizedId: string, id: string): Promise<void> {
+        const suggestion = this.getSuggestions(anonymizedId).find(item => item.id === id);
+        if (!suggestion) return;
+
+        // Everything routes through the methods the panel already uses, so
+        // accepting isn't a second way to write the same state.
+        switch (suggestion.kind) {
+            case 'party':
+                await this.addPartyMember(anonymizedId, suggestion.value);
+                break;
+            case 'quest':
+                await this.addQuest(anonymizedId, suggestion.value);
+                break;
+            case 'quest-done': {
+                // The thread may have been closed by hand since the scan.
+                const quest = this.getQuests(anonymizedId).find(item => item.id === suggestion.detail);
+                if (quest && !quest.done) await this.toggleQuest(anonymizedId, quest.id);
+                break;
+            }
+            case 'npc':
+                await this.addNpc(anonymizedId, suggestion.value, suggestion.detail);
+                break;
+            case 'scene':
+                await this.setEnvironment(suggestion.value);
+                break;
+            case 'condition':
+                this.setCondition(anonymizedId, suggestion.value, suggestion.detail as Condition);
+                break;
+        }
+
+        await this.dropSuggestion(anonymizedId, id, false);
+    }
+
+    async rejectSuggestion(anonymizedId: string, id: string): Promise<void> {
+        await this.dropSuggestion(anonymizedId, id, true);
+    }
+
+    // Removes a suggestion, optionally remembering it as refused so the next
+    // scan doesn't propose it straight back.
+    async dropSuggestion(anonymizedId: string, id: string, remember: boolean): Promise<void> {
+        const suggestions = this.getSuggestions(anonymizedId);
+        const suggestion = suggestions.find(item => item.id === id);
+        if (!suggestion) return;
+
+        const patch: Partial<ChatPartyState> = {
+            suggestions: suggestions.filter(item => item.id !== id)
+        };
+        if (remember) {
+            patch.dismissals = [
+                ...this.getDismissals(anonymizedId),
+                {key: suggestionKey(suggestion.kind, suggestion.value), scan: this.getScanCount(anonymizedId)}
+            ];
+        }
+        await this.patchChatState(anonymizedId, patch);
+        this.notifySuggestionsChanged();
+    }
+
     getCondition(anonymizedId: string, species: string): Condition {
         return this.getUserState(anonymizedId).partyStatus[species.toLowerCase()] ?? 'ok';
     }
@@ -576,7 +911,7 @@ export class Stage extends StageBase<InitStateType, ChatStateType, MessageStateT
 
     withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
         return new Promise((resolve, reject) => {
-            const timer = setTimeout(() => reject(new Error(`Classifier timed out after ${timeoutMs}ms`)), timeoutMs);
+            const timer = setTimeout(() => reject(new Error(`Generation timed out after ${timeoutMs}ms`)), timeoutMs);
             promise.then(
                 (value) => { clearTimeout(timer); resolve(value); },
                 (error) => { clearTimeout(timer); reject(error); }
@@ -633,6 +968,10 @@ export class Stage extends StageBase<InitStateType, ChatStateType, MessageStateT
         // only into stageDirections (for the narrator) and the panel.
         const finalContent: string|undefined = content;
 
+        // Recorded whether or not the dice are involved: what the player did
+        // is as much a part of what the scanner reads as the reply to it.
+        if (finalContent) this.appendNarration(anonymizedId, 'Player', finalContent);
+
         // Dice turned off from the panel: the message goes through untouched,
         // with no classification and so no waiting on the classifier either.
         if (!this.isRollEnabled(anonymizedId)) {
@@ -673,14 +1012,32 @@ export class Stage extends StageBase<InitStateType, ChatStateType, MessageStateT
         const message = botMessage.content;
         const narratorResponse = message.split(/---|\*\*\*|```|system:/i)[0].trim();
 
+        const due: string[] = [];
         for (const user of Object.values(this.users)) {
             this.addAutoPartyMembersFromText(user.anonymizedId, message);
             const userState = this.getUserState(user.anonymizedId);
             userState.lastOutcomePrompt = '';
             // Kept as context for the next action's classification prompt.
             userState.lastNarratorResponse = narratorResponse;
+            this.appendNarration(user.anonymizedId, 'Story', narratorResponse);
+
+            if (this.scanInterval > 0) {
+                userState.turnsSinceScan = (userState.turnsSinceScan ?? 0) + 1;
+                if (userState.turnsSinceScan >= this.scanInterval) {
+                    // Reset before the response is built below, so the cadence
+                    // the player rewinds to is the one after this scan fired.
+                    userState.turnsSinceScan = 0;
+                    due.push(user.anonymizedId);
+                }
+            }
         }
 
+        // Fired, not awaited: the scan writes its own chat state and wakes the
+        // panel when it lands, so nothing here waits on the model. A rejection
+        // would otherwise be invisible, hence the catch.
+        for (const anonymizedId of due) {
+            this.runScan(anonymizedId).catch(error => console.log(error));
+        }
 
         return {
             stageDirections: null,
@@ -818,6 +1175,8 @@ export class Stage extends StageBase<InitStateType, ChatStateType, MessageStateT
                 // swiped-away turn doesn't leave the counter out of step.
                 userState.turnsSinceRoster = messageState[user.anonymizedId]?.['turnsSinceRoster'] ?? this.rosterInterval;
                 userState.partyStatus = this.parsePartyStatus(messageState[user.anonymizedId]?.['partyStatus']);
+                userState.turnsSinceScan = messageState[user.anonymizedId]?.['turnsSinceScan'] ?? 0;
+                userState.narrationBuffer = messageState[user.anonymizedId]?.['narrationBuffer'] ?? '';
             } else {
                 userState.autoParty = [];
                 userState.lastOutcome = null;
@@ -825,6 +1184,8 @@ export class Stage extends StageBase<InitStateType, ChatStateType, MessageStateT
                 userState.lastNarratorResponse = '';
                 userState.turnsSinceRoster = this.rosterInterval;
                 userState.partyStatus = {};
+                userState.turnsSinceScan = 0;
+                userState.narrationBuffer = '';
             }
             this.userState[user.anonymizedId] = userState;
         }
@@ -863,7 +1224,9 @@ export class Stage extends StageBase<InitStateType, ChatStateType, MessageStateT
                 lastOutcomePrompt: userState.lastOutcomePrompt ?? '',
                 lastNarratorResponse: userState.lastNarratorResponse ?? '',
                 turnsSinceRoster: userState.turnsSinceRoster ?? 0,
-                partyStatus: userState.partyStatus ?? {}
+                partyStatus: userState.partyStatus ?? {},
+                turnsSinceScan: userState.turnsSinceScan ?? 0,
+                narrationBuffer: userState.narrationBuffer ?? ''
             };
         }
         return messageState;

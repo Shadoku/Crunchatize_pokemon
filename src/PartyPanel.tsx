@@ -5,6 +5,7 @@ import {anchorFor, onAnchorsLoaded} from "./Portrait";
 import {PartyMember, PartyMemberDetails, DEFAULT_DETAILS, detailsOf, displayNameOf, Condition} from "./Party";
 import {itemCategories} from "./Inventory";
 import {NpcEntry, describeAffinity, AFFINITY_MIN, AFFINITY_MAX} from "./Npc";
+import {SuggestionKind} from "./Scan";
 import {Outcome, ResultClass} from "./Outcome";
 
 function clampLevel(value: string): number {
@@ -161,6 +162,7 @@ function PartyBlock({stage, anonymizedId, name, refresh, onViewPortrait}: {
 
     return (
         <div className="crunchatize-party-block">
+            <SuggestionsPanel stage={stage} anonymizedId={anonymizedId} refresh={refresh} />
             <div className="crunchatize-party-title">{name}'s Party</div>
             {party.length === 0 && <div className="crunchatize-party-empty">No moemon yet.</div>}
             <ul className="crunchatize-party-list">
@@ -367,6 +369,88 @@ function InventoryPanel({stage, anonymizedId, refresh}: {
         </div>
     );
 }
+
+// What the story scanner noticed and the player hasn't ruled on. Sits at the
+// top of the block because it's the only part asking for a decision; when
+// there's nothing pending it shrinks to just the button.
+function SuggestionsPanel({stage, anonymizedId, refresh}: {
+    stage: Stage;
+    anonymizedId: string;
+    refresh: () => void;
+}): ReactElement {
+    const [busy, setBusy] = useState(false);
+
+    // A scan is fired and forgotten, so its findings arrive with nothing
+    // awaiting them - the panel subscribes and re-renders when they land.
+    useEffect(() => stage.onSuggestionsChanged(refresh), []);
+
+    const suggestions = stage.getSuggestions(anonymizedId);
+    const scanning = stage.isScanning;
+
+    async function act(action: () => Promise<void>) {
+        if (busy) return;
+        setBusy(true);
+        try {
+            await action();
+        } finally {
+            setBusy(false);
+            refresh();
+        }
+    }
+
+    return (
+        <div className="crunchatize-suggestions">
+            <div className="crunchatize-suggestions-header">
+                <span className="crunchatize-bag-title">
+                    {suggestions.length > 0 ? `Noticed (${suggestions.length})` : 'Story'}
+                </span>
+                <button
+                    type="button"
+                    className="crunchatize-scan-button"
+                    disabled={scanning || busy}
+                    title="Look over the recent story for changes to your party, threads, characters and scene"
+                    onClick={() => act(() => stage.runScan(anonymizedId))}
+                >{scanning ? 'Scanning…' : 'Scan now'}</button>
+            </div>
+            {suggestions.length > 0 && (
+                <ul className="crunchatize-suggestion-list">
+                    {suggestions.map(suggestion => (
+                        <li key={suggestion.id} className="crunchatize-suggestion">
+                            <span className={`crunchatize-suggestion-kind crunchatize-suggestion-kind--${suggestion.kind}`}>
+                                {KIND_LABELS[suggestion.kind] ?? suggestion.kind}
+                            </span>
+                            <span className="crunchatize-suggestion-text">{suggestion.description}</span>
+                            <button
+                                type="button"
+                                className="crunchatize-suggestion-accept"
+                                aria-label={`Accept: ${suggestion.description}`}
+                                disabled={busy}
+                                onClick={() => act(() => stage.acceptSuggestion(anonymizedId, suggestion.id))}
+                            >✓</button>
+                            <button
+                                type="button"
+                                className="crunchatize-suggestion-reject"
+                                aria-label={`Reject: ${suggestion.description}`}
+                                disabled={busy}
+                                onClick={() => act(() => stage.rejectSuggestion(anonymizedId, suggestion.id))}
+                            >✗</button>
+                        </li>
+                    ))}
+                </ul>
+            )}
+        </div>
+    );
+}
+
+// Short chips, so the row reads as "PARTY  Growlithe joins the party".
+const KIND_LABELS: {[kind in SuggestionKind]: string} = {
+    'party': 'Party',
+    'quest': 'Thread',
+    'quest-done': 'Done',
+    'npc': 'Who',
+    'scene': 'Scene',
+    'condition': 'State'
+};
 
 // Open plot threads. Checked off rather than deleted when they resolve, so
 // the player keeps the history; only unchecked ones are sent to the narrator.
