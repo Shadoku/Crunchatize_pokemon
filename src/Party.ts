@@ -3,6 +3,9 @@ import {getSpecies} from "./Lore";
 
 export type PartySource = 'auto' | 'manual';
 
+// One active moemon and five in balls, the same limit the card narrates.
+export const MAX_PARTY = 6;
+
 // A party member's editable "build" - nickname, level, moveset, held item.
 // Chat-wide, not message-state: unlike position/HP this shouldn't reset on
 // a swipe/branch.

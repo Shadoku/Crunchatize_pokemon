@@ -1,8 +1,9 @@
 import {ReactElement, useEffect, useState} from "react";
 import type {Stage, ScanOutcome} from "./Stage";
 import {speciesNames, getSpecies, speciesImageUrl} from "./Lore";
+import {PlayMode, PLAY_MODES, MODE_LABELS, MODE_BLURBS, modeRolls} from "./Mode";
 import {anchorFor, onAnchorsLoaded} from "./Portrait";
-import {PartyMember, PartyMemberDetails, DEFAULT_DETAILS, detailsOf, displayNameOf, Condition} from "./Party";
+import {PartyMember, PartyMemberDetails, DEFAULT_DETAILS, detailsOf, displayNameOf, Condition, MAX_PARTY} from "./Party";
 import {itemCategories} from "./Inventory";
 import {NpcEntry, describeAffinity, AFFINITY_MIN, AFFINITY_MAX} from "./Npc";
 import {SuggestionKind} from "./Scan";
@@ -63,6 +64,7 @@ export function PartyPanel({stage}: {stage: Stage}): ReactElement {
         <div className="crunchatize-party-panel">
             {/* Shared by everyone in the chat, so it sits above the per-player
                 blocks rather than being repeated inside each one. */}
+            <ModeControl stage={stage} refresh={refresh} />
             <EnvironmentField stage={stage} refresh={refresh} />
             {users.map(user => (
                 <PartyBlock
@@ -75,6 +77,37 @@ export function PartyPanel({stage}: {stage: Stage}): ReactElement {
                 />
             ))}
             {viewing && <PortraitViewer species={viewing} onClose={() => setViewing(null)} />}
+        </div>
+    );
+}
+
+// How much game is showing. Sits at the very top of the panel because it is
+// the setting most likely to be reached for mid-chat: the moment a battle
+// starts, or the moment one stops being interesting.
+function ModeControl({stage, refresh}: {stage: Stage; refresh: () => void}): ReactElement {
+    const current = stage.getMode();
+
+    async function set(mode: PlayMode) {
+        if (mode === current) return;
+        await stage.setMode(mode);
+        refresh();
+    }
+
+    return (
+        <div className="crunchatize-mode">
+            <div className="crunchatize-mode-options" role="group" aria-label="Play mode">
+                {PLAY_MODES.map(mode => (
+                    <button
+                        key={mode}
+                        type="button"
+                        className={`crunchatize-mode-option${mode === current ? ' is-active' : ''}`}
+                        aria-pressed={mode === current}
+                        title={MODE_BLURBS[mode]}
+                        onClick={() => set(mode)}
+                    >{MODE_LABELS[mode]}</button>
+                ))}
+            </div>
+            <div className="crunchatize-mode-blurb">{MODE_BLURBS[current]}</div>
         </div>
     );
 }
@@ -156,9 +189,13 @@ function PartyBlock({stage, anonymizedId, name, refresh, onViewPortrait}: {
 }): ReactElement {
     const [expandedSpecies, setExpandedSpecies] = useState<string | null>(null);
     const [addLevel, setAddLevel] = useState(DEFAULT_DETAILS.level);
+    // Why the last add didn't take (a full party, usually). Cleared as soon
+    // as one succeeds, so it never lingers as a stale complaint.
+    const [addError, setAddError] = useState('');
 
     const party = stage.getFullParty(anonymizedId);
     const partySpecies = new Set(party.map(member => member.species.toLowerCase()));
+    const full = stage.isPartyFull(anonymizedId);
 
     return (
         <div className="crunchatize-party-block">
@@ -166,10 +203,15 @@ function PartyBlock({stage, anonymizedId, name, refresh, onViewPortrait}: {
             <div className="crunchatize-party-title">{name}'s Party</div>
             {party.length === 0 && <div className="crunchatize-party-empty">No moemon yet.</div>}
             <ul className="crunchatize-party-list">
-                {party.map(member => (
+                {party.map((member, index) => (
                     <PartyMemberRow
                         key={member.species}
                         member={member}
+                        active={index === 0}
+                        onSetActive={async () => {
+                            await stage.setActiveMember(anonymizedId, member.species);
+                            refresh();
+                        }}
                         condition={stage.getCondition(anonymizedId, member.species)}
                         onViewPortrait={onViewPortrait}
                         expanded={expandedSpecies === member.species}
@@ -178,8 +220,8 @@ function PartyBlock({stage, anonymizedId, name, refresh, onViewPortrait}: {
                             await stage.removePartyMember(anonymizedId, member.species);
                             refresh();
                         }}
-                        onSetCondition={(condition) => {
-                            stage.setCondition(anonymizedId, member.species, condition);
+                        onSetCondition={async (condition) => {
+                            await stage.setCondition(anonymizedId, member.species, condition);
                             refresh();
                         }}
                         onSaveDetails={async (details) => {
@@ -194,16 +236,17 @@ function PartyBlock({stage, anonymizedId, name, refresh, onViewPortrait}: {
                 <select
                     className="crunchatize-party-add"
                     defaultValue=""
+                    disabled={full}
                     onChange={async (event) => {
                         const species = event.target.value;
                         event.target.value = '';
-                        if (species) {
-                            await stage.addPartyMember(anonymizedId, species, addLevel);
-                            refresh();
-                        }
+                        if (!species) return;
+                        const result = await stage.addPartyMember(anonymizedId, species, addLevel);
+                        setAddError(result.added ? '' : result.reason ?? '');
+                        refresh();
                     }}
                 >
-                    <option value="" disabled>Add a moemon...</option>
+                    <option value="" disabled>{full ? `Party is full (${MAX_PARTY})` : 'Add a moemon...'}</option>
                     {speciesNames
                         .filter(name => !partySpecies.has(name.toLowerCase()))
                         .map(name => <option key={name} value={name}>{name}</option>)}
@@ -219,6 +262,7 @@ function PartyBlock({stage, anonymizedId, name, refresh, onViewPortrait}: {
                     />
                 </label>
             </div>
+            {addError && <div className="crunchatize-party-note">{addError}</div>}
             <InventoryPanel stage={stage} anonymizedId={anonymizedId} refresh={refresh} />
             <QuestPanel stage={stage} anonymizedId={anonymizedId} refresh={refresh} />
             <NpcPanel stage={stage} anonymizedId={anonymizedId} refresh={refresh} />
@@ -389,7 +433,7 @@ function SuggestionsPanel({stage, anonymizedId, refresh}: {
     useEffect(() => stage.onSuggestionsChanged(refresh), []);
 
     const suggestions = stage.getSuggestions(anonymizedId);
-    const scanning = stage.isScanning;
+    const scanning = stage.scanning.has(anonymizedId);
 
     async function act(action: () => Promise<void>) {
         if (busy) return;
@@ -476,7 +520,8 @@ const KIND_LABELS: {[kind in SuggestionKind]: string} = {
     'quest-done': 'Done',
     'npc': 'Who',
     'scene': 'Scene',
-    'condition': 'State'
+    'condition': 'State',
+    'level': 'Level'
 };
 
 // Open plot threads. Checked off rather than deleted when they resolve, so
@@ -563,9 +608,10 @@ function QuestPanel({stage, anonymizedId, refresh}: {
     );
 }
 
-// Recurring characters, and how the player stands with them. Affinity moves
-// on its own as checks involving a name land well or badly; the arrows are
-// here for when the story says otherwise.
+// Recurring characters, and how the player stands with them. Affinity is set
+// here and nowhere else: it used to drift on the outcome of any check that
+// named a tracked character, off a verdict too unreliable to move a number
+// with, so the arrows are now the only thing that moves it.
 function NpcPanel({stage, anonymizedId, refresh}: {
     stage: Stage;
     anonymizedId: string;
@@ -768,6 +814,10 @@ function RollToggle({stage, anonymizedId, refresh}: {
     refresh: () => void;
 }): ReactElement {
     const rolling = stage.isRollEnabled(anonymizedId);
+    // Prose mode isn't adjudicating anything, so the dice have nothing to
+    // decide. Shown disabled rather than hidden, so the control doesn't
+    // appear and disappear as the mode changes.
+    const available = modeRolls(stage.getMode());
 
     async function set(value: boolean) {
         if (value === rolling) return;
@@ -779,19 +829,23 @@ function RollToggle({stage, anonymizedId, refresh}: {
         <div className="crunchatize-rolltoggle">
             <div className="crunchatize-rolltoggle-header">
                 <span className="crunchatize-rolltoggle-label">Your messages</span>
-                <span className="crunchatize-rolltoggle-hint">{rolling ? 'rolls a d20' : 'no roll'}</span>
+                <span className="crunchatize-rolltoggle-hint">
+                    {!available ? 'no rolls in Prose' : rolling ? 'roll a chance of success' : 'no roll'}
+                </span>
             </div>
             <div className="crunchatize-rolltoggle-options" role="group" aria-label="Roll for messages">
                 <button
                     type="button"
                     className={`crunchatize-rolltoggle-option${rolling ? ' is-active' : ''}`}
                     aria-pressed={rolling}
+                    disabled={!available}
                     onClick={() => set(true)}
                 >Roll</button>
                 <button
                     type="button"
                     className={`crunchatize-rolltoggle-option${rolling ? '' : ' is-active'}`}
                     aria-pressed={!rolling}
+                    disabled={!available}
                     onClick={() => set(false)}
                 >No Roll</button>
             </div>
@@ -822,12 +876,14 @@ function LastRoll({outcome}: {outcome: Outcome | null}): ReactElement | null {
     );
 }
 
-function PartyMemberRow({member, condition, expanded, onToggle, onRemove, onSetCondition, onSaveDetails, onViewPortrait}: {
+function PartyMemberRow({member, active, condition, expanded, onToggle, onRemove, onSetActive, onSetCondition, onSaveDetails, onViewPortrait}: {
     member: PartyMember;
+    active: boolean;
     condition: Condition;
     expanded: boolean;
     onToggle: () => void;
     onRemove: () => void;
+    onSetActive: () => void;
     onSetCondition: (condition: Condition) => void;
     onSaveDetails: (details: PartyMemberDetails) => void;
     onViewPortrait: (species: string) => void;
@@ -837,7 +893,7 @@ function PartyMemberRow({member, condition, expanded, onToggle, onRemove, onSetC
     const [imageOk, setImageOk] = useState(true);
 
     return (
-        <li className="crunchatize-party-member">
+        <li className={`crunchatize-party-member${active ? ' is-active' : ''}`}>
             <div
                 className="crunchatize-party-member-row"
                 role="button"
@@ -876,6 +932,27 @@ function PartyMemberRow({member, condition, expanded, onToggle, onRemove, onSetC
                         {member.species.charAt(0)}
                     </span>
                 )}
+                {/* The lead slot is what the narrator sends out and what the
+                    stat block leads with, so it needs to be settable in one
+                    click from the row itself. */}
+                <span
+                    className={`crunchatize-party-lead${active ? ' is-active' : ''}`}
+                    role="button"
+                    tabIndex={0}
+                    aria-pressed={active}
+                    title={active ? `${displayNameOf(member)} is your active moemon` : `Send out ${displayNameOf(member)}`}
+                    onClick={(event) => {
+                        event.stopPropagation();
+                        if (!active) onSetActive();
+                    }}
+                    onKeyDown={(event) => {
+                        if (event.key === 'Enter' || event.key === ' ') {
+                            event.preventDefault();
+                            event.stopPropagation();
+                            if (!active) onSetActive();
+                        }
+                    }}
+                >{active ? '\u2605' : '\u2606'}</span>
                 <span className="crunchatize-party-names">
                     <span className="crunchatize-party-name">{displayNameOf(member)}</span>
                     {details.nickname && <span className="crunchatize-party-species">{member.species}</span>}

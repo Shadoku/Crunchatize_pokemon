@@ -104,6 +104,32 @@ $type-colors: (
   border: 1px solid $line;
   border-radius: 0.5rem;
   overflow: hidden;
+
+  // The active moemon - the one the narrator sends out, and the one the
+  // stat block leads with. Marked on the row itself so the party reads as
+  // an ordered team rather than an unordered list.
+  &.is-active {
+    border-color: rgba($accent-say, 0.55);
+  }
+}
+
+// Star in the member row: filled for the active moemon, hollow and clickable
+// for everyone else.
+.crunchatize-party-lead {
+  flex: none;
+  font-size: 0.95rem;
+  line-height: 1;
+  cursor: pointer;
+  color: $ink-dim;
+  opacity: 0.55;
+
+  &:hover { opacity: 1; }
+
+  &.is-active {
+    color: $accent-say;
+    opacity: 1;
+    cursor: default;
+  }
 }
 
 // The whole row is the hit target for expanding a member's details.
@@ -1206,4 +1232,56 @@ $type-colors: (
 .crunchatize-scan-status {
   font-size: 0.76rem;
   color: $ink-dim;
+}
+
+
+// Play mode: prose, story or full RPG. First thing in the panel, because it
+// is the control most likely to be reached for mid-scene.
+.crunchatize-mode {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  padding: 0.5rem;
+  background-color: $surface-raised;
+  border: 1px solid $line;
+  border-left: 3px solid $accent-do;
+  border-radius: 0.45rem;
+}
+.crunchatize-mode-options {
+  display: flex;
+  gap: 0.35rem;
+}
+.crunchatize-mode-option {
+  flex: 1;
+  font: inherit;
+  font-size: 0.85rem;
+  font-weight: 700;
+  cursor: pointer;
+  color: $ink-dim;
+  background-color: $surface-sunken;
+  border: 1px solid $line;
+  border-radius: 0.35rem;
+  padding: 0.35rem 0.5rem;
+
+  &:hover { border-color: $ink-dim; }
+
+  &.is-active {
+    color: $surface-sunken;
+    background-color: $accent-do;
+    border-color: transparent;
+  }
+}
+.crunchatize-mode-blurb {
+  font-size: 0.75rem;
+  line-height: 1.35;
+  color: $ink-dim;
+}
+
+// Why an action the player just took didn't do anything - a full party,
+// usually. Sits directly under the control that refused.
+.crunchatize-party-note {
+  font-size: 0.75rem;
+  line-height: 1.35;
+  color: $accent-do;
+  padding: 0 0.15rem;
 }

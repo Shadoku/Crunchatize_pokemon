@@ -9,12 +9,13 @@ import {
 import {getSpecies, findSpeciesMentions, escapeRegex} from "./Lore";
 import {
     PartyMember, PartyMemberDetails, DEFAULT_DETAILS, detailsOf, displayNameOf, labelFor, typesOf,
-    Condition, stepConditionDown, stepConditionUp, parseParty
+    Condition, stepConditionDown, stepConditionUp, parseParty, MAX_PARTY
 } from "./Party";
 import {defaultDetailsFor} from "./Moveset";
 import {InventoryItem, parseInventory, sameItem} from "./Inventory";
 import {QuestEntry, parseQuests, newQuestId} from "./Quest";
 import {NpcEntry, parseNpcs, clampAffinity, sameNpc, describeAffinity} from "./Npc";
+import {PlayMode, DEFAULT_MODE, parseMode, parseModeOrNull, modeRolls, modeDirection} from "./Mode";
 import {
     Suggestion, Dismissal, RawDetection, SuggestionKind,
     parseScanOutput, parseSuggestions, parseDismissals,
@@ -43,9 +44,10 @@ interface UserState {
     autoParty: PartyMember[];
     lastOutcome: Outcome|null;
     lastOutcomePrompt: string;
-    // The narrator's last reply, truncated the same way it's shown to the
-    // player. Fed into the next action's classification prompt as context.
-    lastNarratorResponse: string;
+    // The play mode the narrator was last told about. Kept so the mode line
+    // is sent when it changes rather than restated every turn, and so a
+    // rewind re-announces whatever mode that part of the story was told.
+    lastModeSent: PlayMode|null;
     // Prompts since the roster was last put in front of the LLM. Lives in
     // message state so rewinding the chat rewinds the cadence with it.
     turnsSinceRoster: number;
@@ -68,6 +70,32 @@ const DEFAULT_ROSTER_INTERVAL = 6;
 
 // Percentage points one step of the configured difficulty modifier is worth.
 const DIFFICULTY_POINTS_PER_STEP = 5;
+
+// Bounds on the configured difficulty modifier. Past six steps either way the
+// roll is pinned to 0 or 100 and the dice stop meaning anything, so the config
+// is clamped here as well as in the schema.
+const MAX_DIFFICULTY_STEPS = 6;
+
+// The stage posts its party readout as a fenced block under each reply, and
+// models copy it. This strips that copy - and only that: it must match the
+// stage's own shape (a trailing fence whose contents are the readout's own
+// labels) and it must be at the end.
+//
+// It used to be `content.split(/---|\*\*\*|```|system:/i)[0]`, which deleted
+// everything after the first horizontal rule, the first ***emphasis*** or the
+// first code fence anywhere in the reply. On a card that ends scenes with a
+// stat block, that silently ate the block; on any card at all, one italicised
+// aside ate the rest of the message.
+const ECHOED_READOUT = /\n*(?:^|\n)-{3,}\s*\n*```[^\n]*\n(?<body>[\s\S]*?)```\s*$/;
+
+export function trimTrailingBlock(content: string): string {
+    const match = content.match(ECHOED_READOUT);
+    const body = match?.groups?.body ?? '';
+    if (match && /'s (Party|Bag):/i.test(body)) {
+        return content.slice(0, match.index).trimEnd();
+    }
+    return content.trim();
+}
 
 // What resolveAction worked out: the roll, and who the stage decided was
 // taking the action. The member travels with it so the directions can say
@@ -118,8 +146,22 @@ export interface ScanOutcome {
 interface ChatPartyState {
     manualParty: PartyMember[];
     inventory: InventoryItem[];
-    // Whether typed messages are put to the dice. Set from the panel.
+    // Whether typed messages are put to the dice. Set from the panel, and
+    // ignored in prose mode, which never rolls.
     rollEnabled: boolean;
+    // How much game is showing: prose, story or full RPG. Chat-wide, because
+    // it is a table-level agreement about how this chat is being played
+    // rather than a fact about any one point in the story.
+    mode: PlayMode;
+    // Conditions set by hand from the panel since the last message.
+    //
+    // Conditions live in message state, so they rewind with a swipe - but
+    // message state can only be written from inside a lifecycle hook, and the
+    // panel isn't one. A change made between messages therefore existed only
+    // in memory and was lost on reload. These are the pending overrides:
+    // written straight through the messenger, laid over message state on
+    // load, and folded into it by the next hook that runs.
+    pendingConditions: {[speciesLower: string]: Condition};
     // Open plot threads, and the recurring characters the story keeps
     // returning to. Chat-wide rather than message state: a thread the player
     // opened shouldn't vanish because they swiped a reply away.
@@ -143,6 +185,8 @@ const EMPTY_CHAT_STATE: ChatPartyState = {
     manualParty: [],
     inventory: [],
     rollEnabled: true,
+    mode: DEFAULT_MODE,
+    pendingConditions: {},
     quests: [],
     npcs: [],
     environment: '',
@@ -165,6 +209,8 @@ export class Stage extends StageBase<InitStateType, ChatStateType, MessageStateT
     globalModifier: number;
     rosterInterval: number;
     scanInterval: number;
+    // Where a brand-new chat starts before anyone touches the panel.
+    defaultMode: PlayMode;
 
     // A scan is fired and forgotten, so the panel has no call to await; it
     // subscribes instead and re-renders when findings land. Same shape as
@@ -173,8 +219,10 @@ export class Stage extends StageBase<InitStateType, ChatStateType, MessageStateT
     scanListeners: Set<() => void> = new Set();
     // Guards against a second scan starting on top of one in flight (the
     // player pressing Scan now while the interval scan is still out), and
-    // drives the button's own disabled state.
-    isScanning: boolean = false;
+    // drives the button's own disabled state. Per player: a shared flag meant
+    // that in a multiplayer chat only the first player due a scan got one and
+    // everyone else was silently told the stage was busy.
+    scanning: Set<string> = new Set();
 
 
 
@@ -189,9 +237,13 @@ export class Stage extends StageBase<InitStateType, ChatStateType, MessageStateT
         } = data;
         this.users = users;
         this.characters = characters;
-        this.globalModifier = config?.difficultyModifier ?? 0;
+        const modifier = Number(config?.difficultyModifier ?? 0);
+        this.globalModifier = Number.isFinite(modifier)
+            ? Math.min(Math.max(Math.round(modifier), -MAX_DIFFICULTY_STEPS), MAX_DIFFICULTY_STEPS)
+            : 0;
         this.rosterInterval = Math.max(config?.rosterReminderInterval ?? DEFAULT_ROSTER_INTERVAL, 0);
         this.scanInterval = Math.max(config?.scanInterval ?? DEFAULT_SCAN_INTERVAL, 0);
+        this.defaultMode = parseMode(config?.playMode);
         this.chatState = chatState ?? {};
 
         for (const user of Object.values(this.users)) {
@@ -205,7 +257,9 @@ export class Stage extends StageBase<InitStateType, ChatStateType, MessageStateT
             autoParty: [],
             lastOutcome: null,
             lastOutcomePrompt: '',
-            lastNarratorResponse: '',
+            // Null rather than the current mode, so the first prompt of a
+            // chat always says which way this one is being played.
+            lastModeSent: null,
             // Starts due, so the LLM gets the roster on the first prompt
             // rather than only after a full interval has gone by.
             turnsSinceRoster: this.rosterInterval,
@@ -234,6 +288,9 @@ export class Stage extends StageBase<InitStateType, ChatStateType, MessageStateT
     // scanner suggestion the player accepts, or by hand - but it is still read
     // back so entries detected before that change stay visible and removable
     // instead of vanishing from someone's party mid-chat.
+    //
+    // Order is meaningful: the first member is the active moemon, the one the
+    // card's stat block leads with and the one the narrator sends out first.
     getFullParty(anonymizedId: string): PartyMember[] {
         const manual = this.getManualParty(anonymizedId);
         const seen = new Set(manual.map(member => member.species.toLowerCase()));
@@ -261,18 +318,48 @@ export class Stage extends StageBase<InitStateType, ChatStateType, MessageStateT
     // round-trip Chub is actively waiting on to say what it's about to be
     // told anyway.
     stageChatState(anonymizedId: string, patch: Partial<ChatPartyState>): void {
-        const existing = this.chatState[anonymizedId] ?? EMPTY_CHAT_STATE;
+        const existing = this.chatState[anonymizedId] ?? {...EMPTY_CHAT_STATE, mode: this.defaultMode};
         this.chatState = {...this.chatState, [anonymizedId]: {...existing, ...patch}};
     }
 
+    // Whether there is still room in the party. Six, the same limit the card
+    // narrates: one active and five in balls.
+    isPartyFull(anonymizedId: string): boolean {
+        return this.getFullParty(anonymizedId).length >= MAX_PARTY;
+    }
+
     // Adds a moemon to the player's roster by hand, at the level given (its
-    // moves and held item follow from that level).
-    async addPartyMember(anonymizedId: string, species: string, level: number = DEFAULT_DETAILS.level): Promise<void> {
-        if (!getSpecies(species)) return;
+    // moves and held item follow from that level). Reports why it declined,
+    // so the panel can say "party is full" instead of nothing happening.
+    async addPartyMember(anonymizedId: string, species: string, level: number = DEFAULT_DETAILS.level): Promise<{added: boolean; reason?: string}> {
+        const info = getSpecies(species);
+        if (!info) return {added: false, reason: `${species} is not a moemon in the lorebook.`};
+
         const existing = this.getManualParty(anonymizedId);
-        if (existing.some(member => member.species.toLowerCase() === species.toLowerCase())) return;
-        const member = {species, source: 'manual', details: defaultDetailsFor(species, level)} as PartyMember;
+        if (this.getFullParty(anonymizedId).some(member => member.species.toLowerCase() === info.name.toLowerCase())) {
+            return {added: false, reason: `${info.name} is already with you.`};
+        }
+        if (this.isPartyFull(anonymizedId)) {
+            return {added: false, reason: `Your party is full (${MAX_PARTY}). Release someone first.`};
+        }
+
+        const member = {species: info.name, source: 'manual', details: defaultDetailsFor(info.name, level)} as PartyMember;
         await this.patchChatState(anonymizedId, {manualParty: [...existing, member]});
+        return {added: true};
+    }
+
+    // Moves a member to the front of the roster, making her the active
+    // moemon. Auto-detected members are promoted into the manual roster on
+    // the way, since ordering is something the player set on purpose.
+    async setActiveMember(anonymizedId: string, species: string): Promise<void> {
+        const party = this.getFullParty(anonymizedId);
+        const target = party.find(member => member.species.toLowerCase() === species.toLowerCase());
+        if (!target) return;
+        const rest = party.filter(member => member !== target);
+        const manualParty = [target, ...rest].map(member => ({...member, source: 'manual'} as PartyMember));
+        const userState = this.getUserState(anonymizedId);
+        userState.autoParty = [];
+        await this.patchChatState(anonymizedId, {manualParty});
     }
 
     async removePartyMember(anonymizedId: string, species: string): Promise<void> {
@@ -287,10 +374,21 @@ export class Stage extends StageBase<InitStateType, ChatStateType, MessageStateT
     // a member currently surfaced by getFullParty, so this always promotes
     // it into the persisted, chat-wide roster.
     async updatePartyMemberDetails(anonymizedId: string, species: string, details: PartyMemberDetails): Promise<void> {
-        if (!getSpecies(species)) return;
-        const withoutSpecies = this.getManualParty(anonymizedId).filter(member => member.species.toLowerCase() !== species.toLowerCase());
-        const member = {species, source: 'manual', details} as PartyMember;
-        await this.patchChatState(anonymizedId, {manualParty: [...withoutSpecies, member]});
+        const info = getSpecies(species);
+        if (!info) return;
+
+        const member = {species: info.name, source: 'manual', details} as PartyMember;
+        const manual = this.getManualParty(anonymizedId);
+        const index = manual.findIndex(existing => existing.species.toLowerCase() === info.name.toLowerCase());
+
+        // Edited in place. Rebuilding the list as "everyone else, then her"
+        // would move whoever was edited to the back - which, now that the
+        // first slot is the active moemon, would swap out the moemon in front
+        // of {{user}} every time she was given a held item.
+        const manualParty = index >= 0
+            ? manual.map((existing, at) => at === index ? member : existing)
+            : [...manual, member];
+        await this.patchChatState(anonymizedId, {manualParty});
     }
 
     getInventory(anonymizedId: string): InventoryItem[] {
@@ -520,6 +618,10 @@ export class Stage extends StageBase<InitStateType, ChatStateType, MessageStateT
             `NPC | <name> | <who they are, briefly>`,
             `SCENE | <where and when the scene now is>`,
             `CONDITION | <species> | <ok, hurt, or fainted>`,
+            // The card narrates level gains; the panel is where the number
+            // actually lives. Without this the two drift apart within a few
+            // battles and the player has to reconcile them by hand.
+            `LEVEL | <species> | <her new level, digits only> - only for a moemon already in ${player}'s party whose level the story has changed.`,
             ``,
             `Write NONE if nothing has changed. Write no other text.`
         ].join('\n');
@@ -611,6 +713,16 @@ export class Stage extends StageBase<InitStateType, ChatStateType, MessageStateT
                 if (normalize(environment) === normalize(detection.value)) return null;
                 return {kind: 'scene', value: detection.value, detail: ''};
             }
+            case 'level': {
+                const info = getSpecies(detection.value);
+                if (!info) return null;
+                const member = party.find(one => one.species.toLowerCase() === info.name.toLowerCase());
+                if (!member) return null;
+                const level = Math.floor(Number(detection.detail.replace(/[^0-9]/g, '')));
+                if (!Number.isFinite(level) || level < 1 || level > 100) return null;
+                if (detailsOf(member).level === level) return null;
+                return {kind: 'level', value: info.name, detail: String(level)};
+            }
             case 'condition': {
                 const info = getSpecies(detection.value);
                 if (!info) return null;
@@ -633,9 +745,9 @@ export class Stage extends StageBase<InitStateType, ChatStateType, MessageStateT
     // nothing and a scan that never ran look identical from the panel
     // otherwise, which is precisely how this went unnoticed the first time.
     async runScan(anonymizedId: string): Promise<ScanOutcome> {
-        if (this.isScanning) return {ok: false, found: 0, reason: 'busy'};
+        if (this.scanning.has(anonymizedId)) return {ok: false, found: 0, reason: 'busy'};
 
-        this.isScanning = true;
+        this.scanning.add(anonymizedId);
         this.notifySuggestionsChanged();
         try {
             const response = await this.withTimeout(
@@ -672,7 +784,7 @@ export class Stage extends StageBase<InitStateType, ChatStateType, MessageStateT
             console.log(error);
             return {ok: false, found: 0, reason: 'failed'};
         } finally {
-            this.isScanning = false;
+            this.scanning.delete(anonymizedId);
             this.notifySuggestionsChanged();
         }
     }
@@ -687,6 +799,8 @@ export class Stage extends StageBase<InitStateType, ChatStateType, MessageStateT
             case 'party':
                 await this.addPartyMember(anonymizedId, suggestion.value);
                 break;
+            // (a full party simply declines; the suggestion still clears, so
+            // the panel doesn't keep asking about a moemon there's no room for)
             case 'quest':
                 await this.addQuest(anonymizedId, suggestion.value);
                 break;
@@ -703,8 +817,17 @@ export class Stage extends StageBase<InitStateType, ChatStateType, MessageStateT
                 await this.setEnvironment(suggestion.value);
                 break;
             case 'condition':
-                this.setCondition(anonymizedId, suggestion.value, suggestion.detail as Condition);
+                await this.setCondition(anonymizedId, suggestion.value, suggestion.detail as Condition);
                 break;
+            case 'level': {
+                const member = this.getFullParty(anonymizedId)
+                    .find(one => one.species.toLowerCase() === suggestion.value.toLowerCase());
+                if (member) {
+                    await this.updatePartyMemberDetails(anonymizedId, member.species,
+                        {...detailsOf(member), level: Number(suggestion.detail)});
+                }
+                break;
+            }
         }
 
         await this.dropSuggestion(anonymizedId, id, false);
@@ -738,11 +861,39 @@ export class Stage extends StageBase<InitStateType, ChatStateType, MessageStateT
         return this.getUserState(anonymizedId).partyStatus[species.toLowerCase()] ?? 'ok';
     }
 
-    // Manual override from the panel - corrects an auto-nudge or applies a
-    // status the narration described but the classifier didn't trigger.
-    setCondition(anonymizedId: string, species: string, condition: Condition): void {
+    // Manual override from the panel, or an accepted scan finding - corrects
+    // an auto-nudge, or applies a status the narration described.
+    //
+    // Written twice on purpose. The in-memory copy is what this turn reads;
+    // the chat-state copy is what survives a reload, because message state
+    // can only be written from inside a lifecycle hook and the panel is not
+    // one. The next hook folds the pending copy back in and clears it.
+    async setCondition(anonymizedId: string, species: string, condition: Condition): Promise<void> {
+        this.applyCondition(anonymizedId, species, condition);
+        await this.patchChatState(anonymizedId, {
+            pendingConditions: {
+                ...this.getPendingConditions(anonymizedId),
+                [species.toLowerCase()]: condition
+            }
+        });
+    }
+
+    // The in-memory half, for the callers already inside a hook whose
+    // response carries message state back anyway.
+    applyCondition(anonymizedId: string, species: string, condition: Condition): void {
         const userState = this.getUserState(anonymizedId);
         userState.partyStatus = {...userState.partyStatus, [species.toLowerCase()]: condition};
+    }
+
+    getPendingConditions(anonymizedId: string): {[speciesLower: string]: Condition} {
+        return this.parsePartyStatus(this.chatState[anonymizedId]?.pendingConditions);
+    }
+
+    // Called from the hooks, which are returning message state anyway: the
+    // overrides are in it by then, so the pending copy has done its job.
+    clearPendingConditions(anonymizedId: string): void {
+        if (Object.keys(this.getPendingConditions(anonymizedId)).length === 0) return;
+        this.stageChatState(anonymizedId, {pendingConditions: {}});
     }
 
     // An extreme roll nudges the acting member's condition one notch; an
@@ -754,20 +905,38 @@ export class Stage extends StageBase<InitStateType, ChatStateType, MessageStateT
 
         const current = this.getCondition(anonymizedId, member.species);
         if (isCriticalFailure(roll)) {
-            this.setCondition(anonymizedId, member.species, stepConditionDown(current));
+            this.applyCondition(anonymizedId, member.species, stepConditionDown(current));
         } else if (isCriticalSuccess(roll)) {
-            this.setCondition(anonymizedId, member.species, stepConditionUp(current));
+            this.applyCondition(anonymizedId, member.species, stepConditionUp(current));
         }
     }
 
     // Whether the player's next message goes to the dice. Persisted per
-    // player, so the choice survives a reload; defaults to rolling.
+    // player, so the choice survives a reload; defaults to rolling. Prose
+    // mode overrides it: nothing is being adjudicated there.
     isRollEnabled(anonymizedId: string): boolean {
+        if (!modeRolls(this.getMode())) return false;
         return this.chatState[anonymizedId]?.rollEnabled ?? true;
     }
 
     async setRollEnabled(anonymizedId: string, rollEnabled: boolean): Promise<void> {
         await this.patchChatState(anonymizedId, {rollEnabled});
+    }
+
+    // How much game is showing. Chat-wide, and stored in every player's slot
+    // for the same reason the scene is - see setEnvironment.
+    getMode(): PlayMode {
+        for (const state of Object.values(this.chatState)) {
+            if (state?.mode) return parseMode(state.mode);
+        }
+        return this.defaultMode;
+    }
+
+    async setMode(mode: PlayMode): Promise<void> {
+        const parsed = parseMode(mode);
+        for (const user of Object.values(this.users)) {
+            await this.patchChatState(user.anonymizedId, {mode: parsed});
+        }
     }
 
     async load(): Promise<Partial<LoadResponse<InitStateType, ChatStateType, MessageStateType>>> {
@@ -852,7 +1021,7 @@ export class Stage extends StageBase<InitStateType, ChatStateType, MessageStateT
             "user": this.users[anonymizedId]?.name ?? '',
             "char": charName
         });
-        return `\n[INST]${instruction}\n[/INST]${this.rosterNoteIfDue(anonymizedId)}`;
+        return `\n[INST]${instruction}${this.modeLineIfDue(anonymizedId)}\n[/INST]${this.rosterNoteIfDue(anonymizedId)}`;
     }
 
     // The [INST] block handed to the LLM for a resolved action.
@@ -861,7 +1030,19 @@ export class Stage extends StageBase<InitStateType, ChatStateType, MessageStateT
             "user": this.users[anonymizedId]?.name ?? '',
             "char": charName
         });
-        return `\n[INST]${prompt}\n[/INST]${this.rosterNoteIfDue(anonymizedId)}`;
+        return `\n[INST]${prompt}${this.modeLineIfDue(anonymizedId)}\n[/INST]${this.rosterNoteIfDue(anonymizedId)}`;
+    }
+
+    // How this chat is being played, told to the narrator when it changes
+    // and then left alone. Restating it every turn would spend tokens saying
+    // what the previous forty replies already established; saying it only
+    // once would leave a mode switch mid-chat unheard.
+    modeLineIfDue(anonymizedId: string): string {
+        const mode = this.getMode();
+        const userState = this.getUserState(anonymizedId);
+        if (userState.lastModeSent === mode) return '';
+        userState.lastModeSent = mode;
+        return `\n${modeDirection(mode)}`;
     }
 
     // The runtime answers the host's BEFORE/AFTER/SET message with whatever
@@ -959,15 +1140,15 @@ export class Stage extends StageBase<InitStateType, ChatStateType, MessageStateT
 
     async afterResponseInner(botMessage: Message): Promise<Partial<StageResponse<ChatStateType, MessageStateType>>> {
 
-        const message = botMessage.content;
-        const narratorResponse = message.split(/---|\*\*\*|```|system:/i)[0].trim();
+        const narratorResponse = trimTrailingBlock(botMessage.content);
 
         const due: string[] = [];
         for (const user of Object.values(this.users)) {
             const userState = this.getUserState(user.anonymizedId);
             userState.lastOutcomePrompt = '';
-            // Kept as context for the next action's classification prompt.
-            userState.lastNarratorResponse = narratorResponse;
+            // Panel edits made between messages have been folded into the
+            // message state this hook is about to return.
+            this.clearPendingConditions(user.anonymizedId);
 
             if (this.scanInterval > 0) {
                 userState.turnsSinceScan = (userState.turnsSinceScan ?? 0) + 1;
@@ -1006,13 +1187,23 @@ export class Stage extends StageBase<InitStateType, ChatStateType, MessageStateT
         for (const user of Object.values(this.users)) {
             const party = this.getFullParty(user.anonymizedId);
             lines.push(`${user.name}'s Party: ${party.length > 0
-                ? party.map(member => `${labelFor(member, [typesOf(member).join('/') || '???'])} Lv.${detailsOf(member).level}`).join(', ')
+                ? party.map((member, index) => {
+                    const facts = [typesOf(member).join('/') || '???'];
+                    const condition = this.getCondition(user.anonymizedId, member.species);
+                    if (condition !== 'ok') facts.push(condition);
+                    // A star rather than a word: the row is already dense and
+                    // "active" would be the longest thing on it.
+                    return `${index === 0 ? '* ' : ''}${labelFor(member, facts)} Lv.${detailsOf(member).level}`;
+                }).join(', ')
                 : 'No moemon yet'}`);
 
             const bag = this.describeBag(user.anonymizedId);
             if (bag) lines.push(`${user.name}'s Bag: ${bag}`);
         }
-        return '---\n```' + lines.join('\n') + '```';
+        // The newlines matter: with the first line jammed against the
+        // opening fence, markdown reads it as the block's language tag and
+        // the readout renders as one long broken line.
+        return '---\n```\n' + lines.join('\n') + '\n```';
     }
 
     // Which party member the player named as taking the action, if any. A
@@ -1044,22 +1235,45 @@ export class Stage extends StageBase<InitStateType, ChatStateType, MessageStateT
         if (!user) return '';
 
         const party = this.getFullParty(anonymizedId);
-        const roster = party.length > 0
-            ? party.map(member => {
-                const details = detailsOf(member);
-                const facts = [`${typesOf(member).join('/') || '???'}-type`, `Lv.${details.level}`];
-                if (details.heldItem) facts.push(`holding ${details.heldItem}`);
-                const condition = this.getCondition(anonymizedId, member.species);
-                if (condition !== 'ok') facts.push(condition);
-                // Nicknamed members read as "Sparky" (Pikachu, Electric-type,
-                // ...) so the narrator can use the nickname and still knows
-                // what she is.
-                return labelFor(member, facts);
-            }).join('; ')
-            : 'no moemon';
+        if (party.length === 0) {
+            return `${user.name} has no moemon yet.`;
+        }
+
+        // Movesets ride along only in RPG mode. They are the bulkiest part of
+        // the note, and they are the one thing the card's stat block asks the
+        // narrator to reproduce verbatim - so in RPG mode withholding them
+        // guarantees the block and the panel disagree, and in the other two
+        // modes sending them is paying for a line nobody will print.
+        const withMoves = this.getMode() === 'rpg';
+
+        const describe = (member: PartyMember) => {
+            const details = detailsOf(member);
+            const facts = [`${typesOf(member).join('/') || '???'}-type`, `Lv.${details.level}`];
+            const condition = this.getCondition(anonymizedId, member.species);
+            if (condition !== 'ok') facts.push(condition);
+            if (details.heldItem) facts.push(`holding ${details.heldItem}`);
+            if (withMoves) {
+                const moves = details.moves.filter(move => move.trim().length > 0);
+                if (moves.length > 0) facts.push(`knows ${moves.join(', ')}`);
+            }
+            // Nicknamed members read as "Sparky" (Pikachu, Electric-type,
+            // ...) so the narrator can use the nickname and still knows
+            // what she is.
+            return labelFor(member, facts);
+        };
+
+        // The first member is the active one. Said plainly, because the stat
+        // block the card asks for leads with her and otherwise the narrator
+        // picks whoever it happened to mention last.
+        const [active, ...bench] = party;
+        const lines = [`${user.name}'s active moemon: ${describe(active)}.`];
+        if (bench.length > 0) {
+            lines.push(`In her balls: ${bench.map(describe).join('; ')}.`);
+        }
 
         const bag = this.describeBag(anonymizedId);
-        return `${user.name}'s party: ${roster}.${bag ? ` Carrying: ${bag}.` : ''}`;
+        if (bag) lines.push(`Carrying: ${bag}.`);
+        return lines.join(' ');
     }
 
     // Everything the narrator is periodically reminded of: the roster, plus
@@ -1118,7 +1332,7 @@ export class Stage extends StageBase<InitStateType, ChatStateType, MessageStateT
                 const lastOutcome = messageState[user.anonymizedId]?.['lastOutcome'] ?? null;
                 userState.lastOutcome = lastOutcome ? this.convertOutcome(lastOutcome) : null;
                 userState.lastOutcomePrompt = messageState[user.anonymizedId]?.['lastOutcomePrompt'] ?? '';
-                userState.lastNarratorResponse = messageState[user.anonymizedId]?.['lastNarratorResponse'] ?? '';
+                userState.lastModeSent = parseModeOrNull(messageState[user.anonymizedId]?.['lastModeSent']);
                 // Rewinding the chat rewinds the reminder cadence too, so a
                 // swiped-away turn doesn't leave the counter out of step.
                 userState.turnsSinceRoster = messageState[user.anonymizedId]?.['turnsSinceRoster'] ?? this.rosterInterval;
@@ -1128,11 +1342,18 @@ export class Stage extends StageBase<InitStateType, ChatStateType, MessageStateT
                 userState.autoParty = [];
                 userState.lastOutcome = null;
                 userState.lastOutcomePrompt = '';
-                userState.lastNarratorResponse = '';
+                userState.lastModeSent = null;
                 userState.turnsSinceRoster = this.rosterInterval;
                 userState.partyStatus = {};
                 userState.turnsSinceScan = 0;
             }
+            // Conditions set from the panel since the last message go on top:
+            // they were made after this message state was written, so they
+            // are the newer truth right up until the next hook folds them in.
+            userState.partyStatus = {
+                ...userState.partyStatus,
+                ...this.getPendingConditions(user.anonymizedId)
+            };
             this.userState[user.anonymizedId] = userState;
         }
     }
@@ -1172,7 +1393,7 @@ export class Stage extends StageBase<InitStateType, ChatStateType, MessageStateT
                 autoParty: userState.autoParty,
                 lastOutcome: userState.lastOutcome ?? null,
                 lastOutcomePrompt: userState.lastOutcomePrompt ?? '',
-                lastNarratorResponse: userState.lastNarratorResponse ?? '',
+                lastModeSent: userState.lastModeSent ?? null,
                 turnsSinceRoster: userState.turnsSinceRoster ?? 0,
                 partyStatus: userState.partyStatus ?? {},
                 turnsSinceScan: userState.turnsSinceScan ?? 0
@@ -1200,10 +1421,12 @@ export class Stage extends StageBase<InitStateType, ChatStateType, MessageStateT
         userState.lastOutcomePrompt = `${lines.join('\n')}\n`;
     }
 
+    // Substitutes {{user}}/{{char}}. A tag with no replacement is left as it
+    // was rather than replaced with the string "undefined", which is what
+    // reading straight off the map used to put in front of the model.
     replaceTags(source: string, replacements: {[name: string]: string}) {
-        return source.replace(/{{([A-z]*)}}/g, (match) => {
-            return replacements[match.substring(2, match.length - 2)];
-        });
+        return source.replace(/{{([A-Za-z_]+)}}/g, (match, name) =>
+            replacements[name] ?? match);
     }
 
     render(): ReactElement {

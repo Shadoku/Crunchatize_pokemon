@@ -1,38 +1,183 @@
 {
   "_comment": "Quick-pick list for the inventory panel. Purely a convenience: any name can be typed by hand instead. Grouped into <optgroup>s in the order given here.",
-
   "categories": [
     {
       "name": "Poké Balls",
-      "items": ["Poké Ball", "Great Ball", "Ultra Ball", "Master Ball", "Safari Ball", "Level Ball", "Lure Ball", "Moon Ball", "Friend Ball", "Love Ball", "Fast Ball", "Heavy Ball", "Park Ball"]
+      "items": [
+        "Poké Ball",
+        "Great Ball",
+        "Ultra Ball",
+        "Master Ball",
+        "Safari Ball",
+        "Level Ball",
+        "Lure Ball",
+        "Moon Ball",
+        "Friend Ball",
+        "Love Ball",
+        "Fast Ball",
+        "Heavy Ball",
+        "Park Ball"
+      ]
     },
     {
       "name": "Healing",
-      "items": ["Potion", "Super Potion", "Hyper Potion", "Max Potion", "Full Restore", "Revive", "Max Revive", "Fresh Water", "Soda Pop", "Lemonade", "Moomoo Milk", "Berry", "Gold Berry", "Berry Juice", "Rare Candy"]
+      "items": [
+        "Potion",
+        "Super Potion",
+        "Hyper Potion",
+        "Max Potion",
+        "Full Restore",
+        "Revive",
+        "Max Revive",
+        "Fresh Water",
+        "Soda Pop",
+        "Lemonade",
+        "Moomoo Milk",
+        "Berry",
+        "Gold Berry",
+        "Berry Juice",
+        "Rare Candy"
+      ]
     },
     {
       "name": "Status Cures",
-      "items": ["Antidote", "Burn Heal", "Ice Heal", "Awakening", "Paralyze Heal", "Full Heal", "Heal Powder", "Energy Powder", "Energy Root", "Revival Herb"]
+      "items": [
+        "Antidote",
+        "Burn Heal",
+        "Ice Heal",
+        "Awakening",
+        "Paralyze Heal",
+        "Full Heal",
+        "Heal Powder",
+        "Energy Powder",
+        "Energy Root",
+        "Revival Herb"
+      ]
     },
     {
       "name": "Battle Items",
-      "items": ["X Attack", "X Defend", "X Speed", "X Special", "X Accuracy", "Dire Hit", "Guard Spec.", "Ether", "Max Ether", "Elixer", "Max Elixer"]
+      "items": [
+        "X Attack",
+        "X Defend",
+        "X Speed",
+        "X Special",
+        "X Accuracy",
+        "Dire Hit",
+        "Guard Spec.",
+        "Ether",
+        "Max Ether",
+        "Elixer",
+        "Max Elixer"
+      ]
     },
     {
       "name": "Field Items",
-      "items": ["Repel", "Super Repel", "Max Repel", "Escape Rope", "Poké Doll", "Itemfinder", "Town Map", "Bicycle", "Old Rod", "Good Rod", "Super Rod", "Squirtbottle", "Sacred Ash"]
+      "items": [
+        "Repel",
+        "Super Repel",
+        "Max Repel",
+        "Escape Rope",
+        "Poké Doll",
+        "Itemfinder",
+        "Town Map",
+        "Bicycle",
+        "Old Rod",
+        "Good Rod",
+        "Super Rod",
+        "Squirtbottle",
+        "Sacred Ash"
+      ]
     },
     {
       "name": "Key Items",
-      "items": ["Poké Flute", "Silph Scope", "Card Key", "Lift Key", "Secret Key", "Basement Key", "Storage Key", "Machine Part", "S.S. Ticket", "Bike Voucher", "Old Amber", "Coin Case", "Radio Card", "Rainbow Wing", "Silver Wing", "Clear Bell", "Pass", "Egg"]
+      "items": [
+        "Deepwilds Waiver",
+        "Warden Permit",
+        "Shelf Permit",
+        "Poké Flute",
+        "Silph Scope",
+        "Card Key",
+        "Lift Key",
+        "Secret Key",
+        "Basement Key",
+        "Storage Key",
+        "Machine Part",
+        "S.S. Ticket",
+        "Bike Voucher",
+        "Old Amber",
+        "Coin Case",
+        "Radio Card",
+        "Rainbow Wing",
+        "Silver Wing",
+        "Clear Bell",
+        "Pass",
+        "Egg"
+      ]
     },
     {
       "name": "Stones",
-      "items": ["Fire Stone", "Water Stone", "Thunder Stone", "Leaf Stone", "Moon Stone", "Sun Stone", "Everstone", "Dragon Scale", "Up-Grade", "Metal Coat", "King's Rock"]
+      "items": [
+        "Fire Stone",
+        "Water Stone",
+        "Thunder Stone",
+        "Leaf Stone",
+        "Moon Stone",
+        "Sun Stone",
+        "Shiny Stone",
+        "Ice Stone",
+        "Everstone",
+        "Oval Stone",
+        "Dragon Scale",
+        "Up-Grade",
+        "Dubious Disc",
+        "Metal Coat",
+        "King's Rock",
+        "Razor Claw",
+        "Razor Fang",
+        "Protector",
+        "Electirizer",
+        "Magmarizer",
+        "Reaper Cloth",
+        "Black Augurite",
+        "Peat Block",
+        "Linking Cord"
+      ]
     },
     {
       "name": "Held Items",
-      "items": ["Leftovers", "Lucky Egg", "Amulet Coin", "Exp. Share", "Focus Band", "Quick Claw", "Bright Powder", "Scope Lens", "Miracle Berry", "Light Ball", "Thick Club", "Stick", "Oval Stone", "Charcoal", "Mystic Water", "Magnet", "Miracle Seed", "Never-Melt Ice", "Black Belt", "Poison Barb", "Soft Sand", "Sharp Beak", "Twisted Spoon", "Silver Powder", "Hard Stone", "Spell Tag", "Dragon Fang", "Black Glasses", "Silk Scarf", "Fairy Feather", "Pink Bow", "Polkadot Bow"]
+      "items": [
+        "Leftovers",
+        "Lucky Egg",
+        "Amulet Coin",
+        "Exp. Share",
+        "Focus Band",
+        "Quick Claw",
+        "Bright Powder",
+        "Scope Lens",
+        "Miracle Berry",
+        "Light Ball",
+        "Thick Club",
+        "Stick",
+        "Charcoal",
+        "Mystic Water",
+        "Magnet",
+        "Miracle Seed",
+        "Never-Melt Ice",
+        "Black Belt",
+        "Poison Barb",
+        "Soft Sand",
+        "Sharp Beak",
+        "Twisted Spoon",
+        "Silver Powder",
+        "Hard Stone",
+        "Spell Tag",
+        "Dragon Fang",
+        "Black Glasses",
+        "Silk Scarf",
+        "Fairy Feather",
+        "Pink Bow",
+        "Polkadot Bow"
+      ]
     }
   ]
 }

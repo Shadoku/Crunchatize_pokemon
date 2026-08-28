@@ -1,170 +1,1542 @@
 {
-  "_comment": "Default moves/held items for new party members. 'species' entries (lowercase name) win; anything not listed falls back to the type pools below, which cover every species in the lorebook. Type pool moves MUST stay ordered basic -> advanced: a member's level slides a window along the pool, so the ordering is what makes a low-level moemon start with weak moves. See src/Moveset.ts.",
-
+  "_comment": "Default moves/held items for new party members. A 'species' entry (lowercase name) is that species' characteristic four and is used whole at any level. Anything not listed falls back to the type pools below, which cover every species in the lorebook; those MUST stay ordered basic -> advanced, because a member's level slides a four-move window along the pool. See src/Moveset.ts.",
   "types": {
-    "Normal":   {"item": "Silk Scarf",      "moves": ["Tackle", "Quick Attack", "Headbutt", "Body Slam", "Slash", "Swift", "Take Down", "Hyper Beam"]},
-    "Fire":     {"item": "Charcoal",        "moves": ["Ember", "Fire Spin", "Flame Wheel", "Fire Punch", "Will-O-Wisp", "Flamethrower", "Heat Wave", "Fire Blast"]},
-    "Water":    {"item": "Mystic Water",    "moves": ["Water Gun", "Bubble Beam", "Aqua Jet", "Whirlpool", "Rain Dance", "Waterfall", "Surf", "Hydro Pump"]},
-    "Electric": {"item": "Magnet",          "moves": ["Thunder Shock", "Thunder Wave", "Spark", "Charge Beam", "Shock Wave", "Thunderbolt", "Discharge", "Thunder"]},
-    "Grass":    {"item": "Miracle Seed",    "moves": ["Absorb", "Vine Whip", "Leech Seed", "Razor Leaf", "Giga Drain", "Synthesis", "Petal Dance", "Solar Beam"]},
-    "Ice":      {"item": "Never-Melt Ice",  "moves": ["Powder Snow", "Ice Shard", "Icy Wind", "Aurora Beam", "Frost Breath", "Hail", "Ice Beam", "Blizzard"]},
-    "Fighting": {"item": "Black Belt",      "moves": ["Rock Smash", "Karate Chop", "Mach Punch", "Brick Break", "Bulk Up", "Submission", "Cross Chop", "Dynamic Punch"]},
-    "Poison":   {"item": "Poison Barb",     "moves": ["Poison Sting", "Acid", "Poison Fang", "Sludge", "Toxic", "Acid Armor", "Venoshock", "Sludge Bomb"]},
-    "Ground":   {"item": "Soft Sand",       "moves": ["Mud-Slap", "Sand Tomb", "Bone Club", "Dig", "Mud Bomb", "Magnitude", "Sandstorm", "Earthquake"]},
-    "Flying":   {"item": "Sharp Beak",      "moves": ["Peck", "Gust", "Wing Attack", "Aerial Ace", "Roost", "Fly", "Air Slash", "Drill Peck"]},
-    "Psychic":  {"item": "Twisted Spoon",   "moves": ["Confusion", "Hypnosis", "Psybeam", "Reflect", "Light Screen", "Calm Mind", "Psychic", "Future Sight"]},
-    "Bug":      {"item": "Silver Powder",   "moves": ["String Shot", "Leech Life", "Bug Bite", "Fury Cutter", "Pin Missile", "Silver Wind", "Signal Beam", "X-Scissor"]},
-    "Rock":     {"item": "Hard Stone",      "moves": ["Rock Throw", "Harden", "Rollout", "Rock Blast", "Ancient Power", "Rock Slide", "Sandstorm", "Stone Edge"]},
-    "Ghost":    {"item": "Spell Tag",       "moves": ["Lick", "Spite", "Night Shade", "Confuse Ray", "Curse", "Shadow Punch", "Shadow Ball", "Destiny Bond"]},
-    "Dragon":   {"item": "Dragon Fang",     "moves": ["Twister", "Dragon Rage", "Dragon Breath", "Dragon Tail", "Dragon Claw", "Dragon Dance", "Dragon Pulse", "Outrage"]},
-    "Dark":     {"item": "Black Glasses",   "moves": ["Bite", "Pursuit", "Faint Attack", "Torment", "Snarl", "Nasty Plot", "Night Slash", "Crunch"]},
-    "Steel":    {"item": "Metal Coat",      "moves": ["Metal Claw", "Metal Sound", "Bullet Punch", "Iron Defense", "Steel Wing", "Gyro Ball", "Flash Cannon", "Iron Tail"]},
-    "Fairy":    {"item": "Fairy Feather",   "moves": ["Charm", "Sweet Kiss", "Disarming Voice", "Draining Kiss", "Moonlight", "Play Rough", "Dazzling Gleam", "Moonblast"]}
+    "Normal": {
+      "item": "Silk Scarf",
+      "moves": [
+        "Tackle",
+        "Quick Attack",
+        "Headbutt",
+        "Body Slam",
+        "Slash",
+        "Swift",
+        "Take Down",
+        "Hyper Beam"
+      ]
+    },
+    "Fire": {
+      "item": "Charcoal",
+      "moves": [
+        "Ember",
+        "Fire Spin",
+        "Flame Wheel",
+        "Fire Punch",
+        "Will-O-Wisp",
+        "Flamethrower",
+        "Heat Wave",
+        "Fire Blast"
+      ]
+    },
+    "Water": {
+      "item": "Mystic Water",
+      "moves": [
+        "Water Gun",
+        "Bubble Beam",
+        "Aqua Jet",
+        "Whirlpool",
+        "Rain Dance",
+        "Waterfall",
+        "Surf",
+        "Hydro Pump"
+      ]
+    },
+    "Electric": {
+      "item": "Magnet",
+      "moves": [
+        "Thunder Shock",
+        "Thunder Wave",
+        "Spark",
+        "Charge Beam",
+        "Shock Wave",
+        "Thunderbolt",
+        "Discharge",
+        "Thunder"
+      ]
+    },
+    "Grass": {
+      "item": "Miracle Seed",
+      "moves": [
+        "Absorb",
+        "Vine Whip",
+        "Leech Seed",
+        "Razor Leaf",
+        "Giga Drain",
+        "Synthesis",
+        "Petal Dance",
+        "Solar Beam"
+      ]
+    },
+    "Ice": {
+      "item": "Never-Melt Ice",
+      "moves": [
+        "Powder Snow",
+        "Ice Shard",
+        "Icy Wind",
+        "Aurora Beam",
+        "Frost Breath",
+        "Hail",
+        "Ice Beam",
+        "Blizzard"
+      ]
+    },
+    "Fighting": {
+      "item": "Black Belt",
+      "moves": [
+        "Rock Smash",
+        "Karate Chop",
+        "Mach Punch",
+        "Brick Break",
+        "Bulk Up",
+        "Submission",
+        "Cross Chop",
+        "Dynamic Punch"
+      ]
+    },
+    "Poison": {
+      "item": "Poison Barb",
+      "moves": [
+        "Poison Sting",
+        "Acid",
+        "Poison Fang",
+        "Sludge",
+        "Toxic",
+        "Acid Armor",
+        "Venoshock",
+        "Sludge Bomb"
+      ]
+    },
+    "Ground": {
+      "item": "Soft Sand",
+      "moves": [
+        "Mud-Slap",
+        "Sand Tomb",
+        "Bone Club",
+        "Dig",
+        "Mud Bomb",
+        "Magnitude",
+        "Sandstorm",
+        "Earthquake"
+      ]
+    },
+    "Flying": {
+      "item": "Sharp Beak",
+      "moves": [
+        "Peck",
+        "Gust",
+        "Wing Attack",
+        "Aerial Ace",
+        "Roost",
+        "Fly",
+        "Air Slash",
+        "Drill Peck"
+      ]
+    },
+    "Psychic": {
+      "item": "Twisted Spoon",
+      "moves": [
+        "Confusion",
+        "Hypnosis",
+        "Psybeam",
+        "Reflect",
+        "Light Screen",
+        "Calm Mind",
+        "Psychic",
+        "Future Sight"
+      ]
+    },
+    "Bug": {
+      "item": "Silver Powder",
+      "moves": [
+        "String Shot",
+        "Leech Life",
+        "Bug Bite",
+        "Fury Cutter",
+        "Pin Missile",
+        "Silver Wind",
+        "Signal Beam",
+        "X-Scissor"
+      ]
+    },
+    "Rock": {
+      "item": "Hard Stone",
+      "moves": [
+        "Rock Throw",
+        "Harden",
+        "Rollout",
+        "Rock Blast",
+        "Ancient Power",
+        "Rock Slide",
+        "Sandstorm",
+        "Stone Edge"
+      ]
+    },
+    "Ghost": {
+      "item": "Spell Tag",
+      "moves": [
+        "Lick",
+        "Spite",
+        "Night Shade",
+        "Confuse Ray",
+        "Curse",
+        "Shadow Punch",
+        "Shadow Ball",
+        "Destiny Bond"
+      ]
+    },
+    "Dragon": {
+      "item": "Dragon Fang",
+      "moves": [
+        "Twister",
+        "Dragon Rage",
+        "Dragon Breath",
+        "Dragon Tail",
+        "Dragon Claw",
+        "Dragon Dance",
+        "Dragon Pulse",
+        "Outrage"
+      ]
+    },
+    "Dark": {
+      "item": "Black Glasses",
+      "moves": [
+        "Bite",
+        "Pursuit",
+        "Faint Attack",
+        "Torment",
+        "Snarl",
+        "Nasty Plot",
+        "Night Slash",
+        "Crunch"
+      ]
+    },
+    "Steel": {
+      "item": "Metal Coat",
+      "moves": [
+        "Metal Claw",
+        "Metal Sound",
+        "Bullet Punch",
+        "Iron Defense",
+        "Steel Wing",
+        "Gyro Ball",
+        "Flash Cannon",
+        "Iron Tail"
+      ]
+    },
+    "Fairy": {
+      "item": "Fairy Feather",
+      "moves": [
+        "Charm",
+        "Sweet Kiss",
+        "Disarming Voice",
+        "Draining Kiss",
+        "Moonlight",
+        "Play Rough",
+        "Dazzling Gleam",
+        "Moonblast"
+      ]
+    }
   },
-
   "species": {
-    "bulbasaur":  {"moves": ["Tackle", "Vine Whip", "Leech Seed", "Poison Powder"]},
-    "ivysaur":    {"moves": ["Vine Whip", "Razor Leaf", "Sleep Powder", "Take Down"]},
-    "venusaur":   {"moves": ["Solar Beam", "Razor Leaf", "Sludge Bomb", "Synthesis"]},
-    "charmander": {"moves": ["Scratch", "Ember", "Smokescreen", "Dragon Rage"]},
-    "charmeleon": {"moves": ["Flamethrower", "Slash", "Smokescreen", "Dragon Rage"]},
-    "charizard":  {"moves": ["Flamethrower", "Wing Attack", "Slash", "Fire Spin"]},
-    "squirtle":   {"moves": ["Tackle", "Water Gun", "Withdraw", "Bubble"]},
-    "wartortle":  {"moves": ["Water Gun", "Bite", "Rapid Spin", "Protect"]},
-    "blastoise":  {"moves": ["Hydro Pump", "Skull Bash", "Surf", "Withdraw"]},
-
-    "chikorita":  {"moves": ["Tackle", "Razor Leaf", "Reflect", "Poison Powder"]},
-    "bayleef":    {"moves": ["Razor Leaf", "Body Slam", "Light Screen", "Synthesis"]},
-    "meganium":   {"moves": ["Petal Dance", "Body Slam", "Light Screen", "Synthesis"]},
-    "cyndaquil":  {"moves": ["Tackle", "Ember", "Smokescreen", "Quick Attack"]},
-    "quilava":    {"moves": ["Flame Wheel", "Quick Attack", "Smokescreen", "Swift"]},
-    "typhlosion": {"moves": ["Flamethrower", "Swift", "Fire Blast", "Quick Attack"]},
-    "totodile":   {"moves": ["Scratch", "Water Gun", "Bite", "Rage"]},
-    "croconaw":   {"moves": ["Water Gun", "Bite", "Slash", "Screech"]},
-    "feraligatr": {"moves": ["Hydro Pump", "Crunch", "Slash", "Screech"]},
-
-    "pichu":      {"moves": ["Thunder Shock", "Charm", "Tail Whip", "Sweet Kiss"]},
-    "pikachu":    {"moves": ["Thunderbolt", "Quick Attack", "Thunder Wave", "Iron Tail"], "item": "Light Ball"},
-    "raichu":     {"moves": ["Thunderbolt", "Thunder", "Quick Attack", "Thunder Wave"]},
-
-    "eevee":      {"moves": ["Tackle", "Quick Attack", "Sand Attack", "Growl"]},
-    "vaporeon":   {"moves": ["Surf", "Ice Beam", "Aurora Beam", "Acid Armor"]},
-    "jolteon":    {"moves": ["Thunderbolt", "Pin Missile", "Double Kick", "Agility"]},
-    "flareon":    {"moves": ["Flamethrower", "Fire Spin", "Quick Attack", "Bite"]},
-    "espeon":     {"moves": ["Psychic", "Confusion", "Morning Sun", "Reflect"]},
-    "umbreon":    {"moves": ["Faint Attack", "Confuse Ray", "Moonlight", "Screech"]},
-    "leafeon":    {"moves": ["Leaf Blade", "Razor Leaf", "Synthesis", "Swords Dance"]},
-    "glaceon":    {"moves": ["Ice Beam", "Blizzard", "Icy Wind", "Barrier"]},
-
-    "articuno":   {"moves": ["Ice Beam", "Blizzard", "Gust", "Mist"]},
-    "zapdos":     {"moves": ["Thunderbolt", "Thunder", "Drill Peck", "Light Screen"]},
-    "moltres":    {"moves": ["Flamethrower", "Fire Spin", "Wing Attack", "Sky Attack"]},
-    "mewtwo":     {"moves": ["Psychic", "Recover", "Barrier", "Aura Sphere"]},
-    "mew":        {"moves": ["Psychic", "Transform", "Metronome", "Ancient Power"]},
-    "raikou":     {"moves": ["Thunderbolt", "Crunch", "Quick Attack", "Roar"]},
-    "entei":      {"moves": ["Fire Blast", "Stomp", "Bite", "Roar"]},
-    "suicune":    {"moves": ["Surf", "Aurora Beam", "Bite", "Mist"]},
-    "lugia":      {"moves": ["Aeroblast", "Psychic", "Hydro Pump", "Recover"]},
-    "ho-oh":      {"moves": ["Sacred Fire", "Sky Attack", "Recover", "Ancient Power"]},
-    "celebi":     {"moves": ["Leaf Storm", "Psychic", "Recover", "Heal Bell"]},
-
-    "ditto":      {"moves": ["Transform", "", "", ""]},
-    "magikarp":   {"moves": ["Splash", "Tackle", "Flail", ""]},
-    "gyarados":   {"moves": ["Hydro Pump", "Dragon Rage", "Bite", "Hyper Beam"]},
-    "snorlax":    {"moves": ["Body Slam", "Rest", "Belly Drum", "Hyper Beam"], "item": "Leftovers"},
-    "munchlax":   {"moves": ["Tackle", "Lick", "Rest", "Screech"], "item": "Leftovers"},
-    "chansey":    {"moves": ["Softboiled", "Egg Bomb", "Sing", "Defense Curl"], "item": "Lucky Egg"},
-    "blissey":    {"moves": ["Softboiled", "Egg Bomb", "Sing", "Light Screen"], "item": "Lucky Egg"},
-    "happiny":    {"moves": ["Pound", "Charm", "Copycat", "Sweet Kiss"], "item": "Oval Stone"},
-    "wobbuffet":  {"moves": ["Counter", "Mirror Coat", "Safeguard", "Destiny Bond"]},
-    "wynaut":     {"moves": ["Splash", "Charm", "Encore", "Counter"]},
-    "smeargle":   {"moves": ["Sketch", "Tail Whip", "Mimic", "Odor Sleuth"]},
-    "unown":      {"moves": ["Hidden Power", "", "", ""]},
-    "shuckle":    {"moves": ["Withdraw", "Wrap", "Bide", "Rest"], "item": "Berry Juice"},
-    "sudowoodo":  {"moves": ["Mimic", "Rock Slide", "Slam", "Faint Attack"]},
-    "bonsly":     {"moves": ["Mimic", "Rock Throw", "Flail", "Copycat"]},
-
-    "onix":       {"moves": ["Rock Slide", "Bind", "Harden", "Dig"]},
-    "steelix":    {"moves": ["Iron Tail", "Earthquake", "Rock Slide", "Iron Defense"]},
-    "gengar":     {"moves": ["Shadow Ball", "Hypnosis", "Dream Eater", "Night Shade"]},
-    "haunter":    {"moves": ["Night Shade", "Hypnosis", "Confuse Ray", "Lick"]},
-    "gastly":     {"moves": ["Lick", "Hypnosis", "Night Shade", "Spite"]},
-    "alakazam":   {"moves": ["Psychic", "Recover", "Reflect", "Disable"]},
-    "kadabra":    {"moves": ["Confusion", "Psybeam", "Disable", "Reflect"]},
-    "abra":       {"moves": ["Teleport", "Hidden Power", "", ""]},
-    "machamp":    {"moves": ["Cross Chop", "Submission", "Karate Chop", "Seismic Toss"]},
-    "golem":      {"moves": ["Earthquake", "Rock Slide", "Explosion", "Harden"]},
-    "lapras":     {"moves": ["Surf", "Ice Beam", "Body Slam", "Sing"]},
-    "dratini":    {"moves": ["Wrap", "Thunder Wave", "Dragon Rage", "Agility"]},
-    "dragonair":  {"moves": ["Dragon Rage", "Thunder Wave", "Wrap", "Agility"]},
-    "dragonite":  {"moves": ["Outrage", "Hyper Beam", "Wing Attack", "Dragon Dance"]},
-    "aerodactyl": {"moves": ["Rock Slide", "Wing Attack", "Ancient Power", "Bite"]},
-    "tyranitar":  {"moves": ["Rock Slide", "Crunch", "Earthquake", "Sandstorm"]},
-    "scizor":     {"moves": ["Metal Claw", "Fury Cutter", "Swords Dance", "Bullet Punch"]},
-    "skarmory":   {"moves": ["Steel Wing", "Drill Peck", "Sand Attack", "Roost"]},
-    "jynx":       {"moves": ["Ice Beam", "Lovely Kiss", "Psychic", "Powder Snow"]},
-    "smoochum":   {"moves": ["Powder Snow", "Lovely Kiss", "Confusion", "Sweet Kiss"]},
-    "electabuzz": {"moves": ["Thunderbolt", "Thunder Punch", "Light Screen", "Quick Attack"]},
-    "electivire": {"moves": ["Thunderbolt", "Thunder Punch", "Ice Punch", "Light Screen"]},
-    "elekid":     {"moves": ["Thunder Shock", "Quick Attack", "Light Screen", "Swift"]},
-    "magmar":     {"moves": ["Flamethrower", "Fire Punch", "Confuse Ray", "Smokescreen"]},
-    "magmortar":  {"moves": ["Fire Blast", "Flamethrower", "Thunder Punch", "Confuse Ray"]},
-    "magby":      {"moves": ["Ember", "Smokescreen", "Fire Punch", "Confuse Ray"]},
-    "pinsir":     {"moves": ["Vice Grip", "Guillotine", "Submission", "Swords Dance"]},
-    "heracross":  {"moves": ["Megahorn", "Brick Break", "Horn Attack", "Endure"]},
-    "tauros":     {"moves": ["Body Slam", "Take Down", "Rage", "Horn Attack"]},
-    "miltank":    {"moves": ["Milk Drink", "Body Slam", "Rollout", "Stomp"]},
-    "kangaskhan": {"moves": ["Comet Punch", "Dizzy Punch", "Bite", "Rage"]},
-    "porygon":    {"moves": ["Tackle", "Conversion", "Psybeam", "Recover"]},
-    "porygon2":   {"moves": ["Tri Attack", "Recover", "Conversion", "Psybeam"]},
-    "porygon-z":  {"moves": ["Tri Attack", "Nasty Plot", "Recover", "Hyper Beam"]},
-    "mr. mime":   {"moves": ["Barrier", "Psychic", "Light Screen", "Reflect"]},
-    "mime jr.":   {"moves": ["Mimic", "Confusion", "Barrier", "Copycat"]},
-    "farfetch'd": {"moves": ["Slash", "Fury Attack", "Swords Dance", "Aerial Ace"], "item": "Stick"},
-    "togepi":     {"moves": ["Metronome", "Charm", "Sweet Kiss", "Growl"]},
-    "togetic":    {"moves": ["Metronome", "Charm", "Fly", "Safeguard"]},
-    "togekiss":   {"moves": ["Air Slash", "Dazzling Gleam", "Aura Sphere", "Roost"]},
-    "slowpoke":   {"moves": ["Confusion", "Water Gun", "Yawn", "Disable"]},
-    "slowbro":    {"moves": ["Psychic", "Surf", "Withdraw", "Amnesia"]},
-    "slowking":   {"moves": ["Psychic", "Surf", "Swagger", "Nasty Plot"], "item": "King's Rock"},
-    "politoed":   {"moves": ["Surf", "Body Slam", "Hypnosis", "Perish Song"], "item": "King's Rock"},
-    "cloyster":   {"moves": ["Ice Beam", "Spike Cannon", "Withdraw", "Clamp"]},
-    "starmie":    {"moves": ["Psychic", "Surf", "Recover", "Rapid Spin"]},
-    "cubone":     {"moves": ["Bone Club", "Headbutt", "Growl", "Focus Energy"], "item": "Thick Club"},
-    "marowak":    {"moves": ["Bone Club", "Bonemerang", "Headbutt", "Focus Energy"], "item": "Thick Club"},
-    "hitmonlee":  {"moves": ["Hi Jump Kick", "Mega Kick", "Double Kick", "Meditate"]},
-    "hitmonchan": {"moves": ["Fire Punch", "Ice Punch", "Thunder Punch", "Mach Punch"]},
-    "hitmontop":  {"moves": ["Triple Kick", "Rapid Spin", "Dig", "Detect"]},
-    "tyrogue":    {"moves": ["Tackle", "Helping Hand", "Fake Out", "Foresight"]},
-    "lickitung":  {"moves": ["Lick", "Wrap", "Slam", "Screech"]},
-    "lickilicky": {"moves": ["Lick", "Wring Out", "Body Slam", "Screech"]},
-    "weezing":    {"moves": ["Sludge Bomb", "Explosion", "Smokescreen", "Toxic"]},
-    "rhydon":     {"moves": ["Earthquake", "Horn Drill", "Rock Slide", "Take Down"]},
-    "rhyperior":  {"moves": ["Earthquake", "Rock Wrecker", "Megahorn", "Hammer Arm"]},
-    "kingdra":    {"moves": ["Hydro Pump", "Dragon Pulse", "Twister", "Agility"]},
-    "girafarig":  {"moves": ["Psybeam", "Stomp", "Agility", "Baton Pass"]},
-    "dunsparce":  {"moves": ["Rage", "Glare", "Dig", "Ancient Power"]},
-    "delibird":   {"moves": ["Present", "Ice Punch", "Fly", "Rapid Spin"]},
-    "corsola":    {"moves": ["Recover", "Bubble Beam", "Rock Blast", "Ancient Power"]},
-    "qwilfish":   {"moves": ["Pin Missile", "Poison Sting", "Water Gun", "Minimize"]},
-    "octillery":  {"moves": ["Octazooka", "Ice Beam", "Constrict", "Bubble Beam"]},
-    "remoraid":   {"moves": ["Water Gun", "Psybeam", "Aurora Beam", "Bubble Beam"]},
-    "ampharos":   {"moves": ["Thunderbolt", "Thunder Wave", "Light Screen", "Cotton Spore"]},
-    "azumarill":  {"moves": ["Water Gun", "Rollout", "Play Rough", "Rain Dance"]},
-    "bellossom":  {"moves": ["Petal Dance", "Sleep Powder", "Sunny Day", "Synthesis"]},
-    "jumpluff":   {"moves": ["Leech Seed", "Sleep Powder", "Cotton Spore", "Aerial Ace"]},
-    "quagsire":   {"moves": ["Surf", "Earthquake", "Amnesia", "Yawn"]},
-    "mamoswine":  {"moves": ["Earthquake", "Ice Shard", "Blizzard", "Ancient Power"]},
-    "weavile":    {"moves": ["Night Slash", "Ice Punch", "Swords Dance", "Fake Out"]},
-    "sneasel":    {"moves": ["Faint Attack", "Icy Wind", "Quick Attack", "Screech"]},
-    "houndoom":   {"moves": ["Flamethrower", "Crunch", "Faint Attack", "Roar"]},
-    "mismagius":  {"moves": ["Shadow Ball", "Confuse Ray", "Perish Song", "Mystical Fire"]},
-    "misdreavus": {"moves": ["Night Shade", "Confuse Ray", "Perish Song", "Spite"]},
-    "honchkrow":  {"moves": ["Night Slash", "Drill Peck", "Faint Attack", "Nasty Plot"]},
-    "ambipom":    {"moves": ["Double Hit", "Fake Out", "Baton Pass", "Swift"]},
-    "yanmega":    {"moves": ["Air Slash", "Bug Buzz", "Ancient Power", "Double Team"]},
-    "gliscor":    {"moves": ["Earthquake", "Aerial Ace", "Poison Jab", "Roost"]},
-    "magnezone":  {"moves": ["Thunderbolt", "Flash Cannon", "Thunder Wave", "Magnet Rise"]},
-    "tangrowth":  {"moves": ["Power Whip", "Giga Drain", "Ancient Power", "Synthesis"]}
+    "abra": {
+      "moves": [
+        "Teleport",
+        "Hidden Power",
+        "",
+        ""
+      ]
+    },
+    "aerodactyl": {
+      "moves": [
+        "Rock Slide",
+        "Wing Attack",
+        "Ancient Power",
+        "Bite"
+      ]
+    },
+    "alakazam": {
+      "moves": [
+        "Psychic",
+        "Recover",
+        "Reflect",
+        "Disable"
+      ]
+    },
+    "ambipom": {
+      "moves": [
+        "Double Hit",
+        "Fake Out",
+        "Baton Pass",
+        "Swift"
+      ]
+    },
+    "ampharos": {
+      "moves": [
+        "Thunderbolt",
+        "Thunder Wave",
+        "Light Screen",
+        "Cotton Spore"
+      ]
+    },
+    "annihilape": {
+      "moves": [
+        "Rage Fist",
+        "Shadow Claw",
+        "Close Combat",
+        "Bulk Up"
+      ]
+    },
+    "articuno": {
+      "moves": [
+        "Ice Beam",
+        "Blizzard",
+        "Gust",
+        "Mist"
+      ]
+    },
+    "azumarill": {
+      "moves": [
+        "Water Gun",
+        "Rollout",
+        "Play Rough",
+        "Rain Dance"
+      ]
+    },
+    "azurill": {
+      "moves": [
+        "Splash",
+        "Charm",
+        "Bubble",
+        "Tail Whip"
+      ]
+    },
+    "bayleef": {
+      "moves": [
+        "Razor Leaf",
+        "Body Slam",
+        "Light Screen",
+        "Synthesis"
+      ]
+    },
+    "bellossom": {
+      "moves": [
+        "Petal Dance",
+        "Sleep Powder",
+        "Sunny Day",
+        "Synthesis"
+      ]
+    },
+    "blastoise": {
+      "moves": [
+        "Hydro Pump",
+        "Skull Bash",
+        "Surf",
+        "Withdraw"
+      ]
+    },
+    "blissey": {
+      "moves": [
+        "Softboiled",
+        "Egg Bomb",
+        "Sing",
+        "Light Screen"
+      ],
+      "item": "Lucky Egg"
+    },
+    "bonsly": {
+      "moves": [
+        "Mimic",
+        "Rock Throw",
+        "Flail",
+        "Copycat"
+      ]
+    },
+    "bulbasaur": {
+      "moves": [
+        "Tackle",
+        "Vine Whip",
+        "Leech Seed",
+        "Poison Powder"
+      ]
+    },
+    "celebi": {
+      "moves": [
+        "Leaf Storm",
+        "Psychic",
+        "Recover",
+        "Heal Bell"
+      ]
+    },
+    "chansey": {
+      "moves": [
+        "Softboiled",
+        "Egg Bomb",
+        "Sing",
+        "Defense Curl"
+      ],
+      "item": "Lucky Egg"
+    },
+    "charizard": {
+      "moves": [
+        "Flamethrower",
+        "Wing Attack",
+        "Slash",
+        "Fire Spin"
+      ]
+    },
+    "charmander": {
+      "moves": [
+        "Scratch",
+        "Ember",
+        "Smokescreen",
+        "Dragon Rage"
+      ]
+    },
+    "charmeleon": {
+      "moves": [
+        "Flamethrower",
+        "Slash",
+        "Smokescreen",
+        "Dragon Rage"
+      ]
+    },
+    "chikorita": {
+      "moves": [
+        "Tackle",
+        "Razor Leaf",
+        "Reflect",
+        "Poison Powder"
+      ]
+    },
+    "clefable": {
+      "moves": [
+        "Moonblast",
+        "Metronome",
+        "Cosmic Power",
+        "Moonlight"
+      ]
+    },
+    "clefairy": {
+      "moves": [
+        "Disarming Voice",
+        "Metronome",
+        "Moonlight",
+        "Sing"
+      ]
+    },
+    "cleffa": {
+      "moves": [
+        "Pound",
+        "Charm",
+        "Encore",
+        "Sweet Kiss"
+      ]
+    },
+    "clodsire": {
+      "moves": [
+        "Poison Jab",
+        "Earthquake",
+        "Amnesia",
+        "Yawn"
+      ]
+    },
+    "cloyster": {
+      "moves": [
+        "Ice Beam",
+        "Spike Cannon",
+        "Withdraw",
+        "Clamp"
+      ]
+    },
+    "corsola": {
+      "moves": [
+        "Recover",
+        "Bubble Beam",
+        "Rock Blast",
+        "Ancient Power"
+      ]
+    },
+    "croconaw": {
+      "moves": [
+        "Water Gun",
+        "Bite",
+        "Slash",
+        "Screech"
+      ]
+    },
+    "cubone": {
+      "moves": [
+        "Bone Club",
+        "Headbutt",
+        "Growl",
+        "Focus Energy"
+      ],
+      "item": "Thick Club"
+    },
+    "cursola": {
+      "moves": [
+        "Shadow Ball",
+        "Hex",
+        "Power Gem",
+        "Curse"
+      ]
+    },
+    "cyndaquil": {
+      "moves": [
+        "Tackle",
+        "Ember",
+        "Smokescreen",
+        "Quick Attack"
+      ]
+    },
+    "delibird": {
+      "moves": [
+        "Present",
+        "Ice Punch",
+        "Fly",
+        "Rapid Spin"
+      ]
+    },
+    "ditto": {
+      "moves": [
+        "Transform",
+        "",
+        "",
+        ""
+      ]
+    },
+    "dragonair": {
+      "moves": [
+        "Dragon Rage",
+        "Thunder Wave",
+        "Wrap",
+        "Agility"
+      ]
+    },
+    "dragonite": {
+      "moves": [
+        "Outrage",
+        "Hyper Beam",
+        "Wing Attack",
+        "Dragon Dance"
+      ]
+    },
+    "dratini": {
+      "moves": [
+        "Wrap",
+        "Thunder Wave",
+        "Dragon Rage",
+        "Agility"
+      ]
+    },
+    "dudunsparce": {
+      "moves": [
+        "Hyper Drill",
+        "Body Slam",
+        "Coil",
+        "Roost"
+      ]
+    },
+    "dunsparce": {
+      "moves": [
+        "Rage",
+        "Glare",
+        "Dig",
+        "Ancient Power"
+      ]
+    },
+    "eevee": {
+      "moves": [
+        "Tackle",
+        "Quick Attack",
+        "Sand Attack",
+        "Growl"
+      ]
+    },
+    "electabuzz": {
+      "moves": [
+        "Thunderbolt",
+        "Thunder Punch",
+        "Light Screen",
+        "Quick Attack"
+      ]
+    },
+    "electivire": {
+      "moves": [
+        "Thunderbolt",
+        "Thunder Punch",
+        "Ice Punch",
+        "Light Screen"
+      ]
+    },
+    "elekid": {
+      "moves": [
+        "Thunder Shock",
+        "Quick Attack",
+        "Light Screen",
+        "Swift"
+      ]
+    },
+    "entei": {
+      "moves": [
+        "Fire Blast",
+        "Stomp",
+        "Bite",
+        "Roar"
+      ]
+    },
+    "espeon": {
+      "moves": [
+        "Psychic",
+        "Confusion",
+        "Morning Sun",
+        "Reflect"
+      ]
+    },
+    "farfetch'd": {
+      "moves": [
+        "Slash",
+        "Fury Attack",
+        "Swords Dance",
+        "Aerial Ace"
+      ],
+      "item": "Stick"
+    },
+    "farigiraf": {
+      "moves": [
+        "Twin Beam",
+        "Psychic",
+        "Crunch",
+        "Calm Mind"
+      ]
+    },
+    "feraligatr": {
+      "moves": [
+        "Hydro Pump",
+        "Crunch",
+        "Slash",
+        "Screech"
+      ]
+    },
+    "flareon": {
+      "moves": [
+        "Flamethrower",
+        "Fire Spin",
+        "Quick Attack",
+        "Bite"
+      ]
+    },
+    "gastly": {
+      "moves": [
+        "Lick",
+        "Hypnosis",
+        "Night Shade",
+        "Spite"
+      ]
+    },
+    "gengar": {
+      "moves": [
+        "Shadow Ball",
+        "Hypnosis",
+        "Dream Eater",
+        "Night Shade"
+      ]
+    },
+    "girafarig": {
+      "moves": [
+        "Psybeam",
+        "Stomp",
+        "Agility",
+        "Baton Pass"
+      ]
+    },
+    "glaceon": {
+      "moves": [
+        "Ice Beam",
+        "Ice Shard",
+        "Icy Wind",
+        "Charm"
+      ]
+    },
+    "gliscor": {
+      "moves": [
+        "Earthquake",
+        "Aerial Ace",
+        "Poison Jab",
+        "Roost"
+      ]
+    },
+    "golem": {
+      "moves": [
+        "Earthquake",
+        "Rock Slide",
+        "Explosion",
+        "Harden"
+      ]
+    },
+    "granbull": {
+      "moves": [
+        "Play Rough",
+        "Crunch",
+        "Fire Fang",
+        "Roar"
+      ]
+    },
+    "gyarados": {
+      "moves": [
+        "Hydro Pump",
+        "Dragon Rage",
+        "Bite",
+        "Hyper Beam"
+      ]
+    },
+    "happiny": {
+      "moves": [
+        "Pound",
+        "Charm",
+        "Copycat",
+        "Sweet Kiss"
+      ],
+      "item": "Oval Stone"
+    },
+    "haunter": {
+      "moves": [
+        "Night Shade",
+        "Hypnosis",
+        "Confuse Ray",
+        "Lick"
+      ]
+    },
+    "heracross": {
+      "moves": [
+        "Megahorn",
+        "Brick Break",
+        "Horn Attack",
+        "Endure"
+      ]
+    },
+    "hitmonchan": {
+      "moves": [
+        "Fire Punch",
+        "Ice Punch",
+        "Thunder Punch",
+        "Mach Punch"
+      ]
+    },
+    "hitmonlee": {
+      "moves": [
+        "Hi Jump Kick",
+        "Mega Kick",
+        "Double Kick",
+        "Meditate"
+      ]
+    },
+    "hitmontop": {
+      "moves": [
+        "Triple Kick",
+        "Rapid Spin",
+        "Dig",
+        "Detect"
+      ]
+    },
+    "ho-oh": {
+      "moves": [
+        "Sacred Fire",
+        "Sky Attack",
+        "Recover",
+        "Ancient Power"
+      ]
+    },
+    "honchkrow": {
+      "moves": [
+        "Night Slash",
+        "Drill Peck",
+        "Faint Attack",
+        "Nasty Plot"
+      ]
+    },
+    "houndoom": {
+      "moves": [
+        "Flamethrower",
+        "Crunch",
+        "Faint Attack",
+        "Roar"
+      ]
+    },
+    "igglybuff": {
+      "moves": [
+        "Sing",
+        "Charm",
+        "Pound",
+        "Sweet Kiss"
+      ]
+    },
+    "ivysaur": {
+      "moves": [
+        "Vine Whip",
+        "Razor Leaf",
+        "Sleep Powder",
+        "Take Down"
+      ]
+    },
+    "jigglypuff": {
+      "moves": [
+        "Sing",
+        "Disarming Voice",
+        "Rollout",
+        "Double Slap"
+      ]
+    },
+    "jolteon": {
+      "moves": [
+        "Thunderbolt",
+        "Pin Missile",
+        "Double Kick",
+        "Agility"
+      ]
+    },
+    "jumpluff": {
+      "moves": [
+        "Leech Seed",
+        "Sleep Powder",
+        "Cotton Spore",
+        "Aerial Ace"
+      ]
+    },
+    "jynx": {
+      "moves": [
+        "Ice Beam",
+        "Lovely Kiss",
+        "Psychic",
+        "Powder Snow"
+      ]
+    },
+    "kadabra": {
+      "moves": [
+        "Confusion",
+        "Psybeam",
+        "Disable",
+        "Reflect"
+      ]
+    },
+    "kangaskhan": {
+      "moves": [
+        "Comet Punch",
+        "Dizzy Punch",
+        "Bite",
+        "Rage"
+      ]
+    },
+    "kingdra": {
+      "moves": [
+        "Hydro Pump",
+        "Dragon Pulse",
+        "Twister",
+        "Agility"
+      ]
+    },
+    "kleavor": {
+      "moves": [
+        "Stone Axe",
+        "X-Scissor",
+        "Rock Slide",
+        "Double Team"
+      ]
+    },
+    "lapras": {
+      "moves": [
+        "Surf",
+        "Ice Beam",
+        "Body Slam",
+        "Sing"
+      ]
+    },
+    "leafeon": {
+      "moves": [
+        "Leaf Blade",
+        "Razor Leaf",
+        "Synthesis",
+        "Swords Dance"
+      ]
+    },
+    "lickilicky": {
+      "moves": [
+        "Lick",
+        "Wring Out",
+        "Body Slam",
+        "Screech"
+      ]
+    },
+    "lickitung": {
+      "moves": [
+        "Lick",
+        "Wrap",
+        "Slam",
+        "Screech"
+      ]
+    },
+    "lugia": {
+      "moves": [
+        "Aeroblast",
+        "Psychic",
+        "Hydro Pump",
+        "Recover"
+      ]
+    },
+    "machamp": {
+      "moves": [
+        "Cross Chop",
+        "Submission",
+        "Karate Chop",
+        "Seismic Toss"
+      ]
+    },
+    "magby": {
+      "moves": [
+        "Ember",
+        "Smokescreen",
+        "Fire Punch",
+        "Confuse Ray"
+      ]
+    },
+    "magikarp": {
+      "moves": [
+        "Splash",
+        "Tackle",
+        "Flail",
+        ""
+      ]
+    },
+    "magmar": {
+      "moves": [
+        "Flamethrower",
+        "Fire Punch",
+        "Confuse Ray",
+        "Smokescreen"
+      ]
+    },
+    "magmortar": {
+      "moves": [
+        "Fire Blast",
+        "Flamethrower",
+        "Thunder Punch",
+        "Confuse Ray"
+      ]
+    },
+    "magnezone": {
+      "moves": [
+        "Thunderbolt",
+        "Flash Cannon",
+        "Thunder Wave",
+        "Magnet Rise"
+      ]
+    },
+    "mamoswine": {
+      "moves": [
+        "Earthquake",
+        "Ice Shard",
+        "Blizzard",
+        "Ancient Power"
+      ]
+    },
+    "marill": {
+      "moves": [
+        "Bubble Beam",
+        "Play Rough",
+        "Aqua Jet",
+        "Tail Whip"
+      ]
+    },
+    "marowak": {
+      "moves": [
+        "Bone Club",
+        "Bonemerang",
+        "Headbutt",
+        "Focus Energy"
+      ],
+      "item": "Thick Club"
+    },
+    "meganium": {
+      "moves": [
+        "Petal Dance",
+        "Body Slam",
+        "Light Screen",
+        "Synthesis"
+      ]
+    },
+    "mew": {
+      "moves": [
+        "Psychic",
+        "Transform",
+        "Metronome",
+        "Ancient Power"
+      ]
+    },
+    "mewtwo": {
+      "moves": [
+        "Psychic",
+        "Recover",
+        "Barrier",
+        "Aura Sphere"
+      ]
+    },
+    "miltank": {
+      "moves": [
+        "Milk Drink",
+        "Body Slam",
+        "Rollout",
+        "Stomp"
+      ]
+    },
+    "mime jr.": {
+      "moves": [
+        "Mimic",
+        "Confusion",
+        "Barrier",
+        "Copycat"
+      ]
+    },
+    "misdreavus": {
+      "moves": [
+        "Night Shade",
+        "Confuse Ray",
+        "Perish Song",
+        "Spite"
+      ]
+    },
+    "mismagius": {
+      "moves": [
+        "Shadow Ball",
+        "Confuse Ray",
+        "Perish Song",
+        "Mystical Fire"
+      ]
+    },
+    "moltres": {
+      "moves": [
+        "Flamethrower",
+        "Fire Spin",
+        "Wing Attack",
+        "Sky Attack"
+      ]
+    },
+    "mr. mime": {
+      "moves": [
+        "Barrier",
+        "Psychic",
+        "Light Screen",
+        "Reflect"
+      ]
+    },
+    "mr. rime": {
+      "moves": [
+        "Icy Wind",
+        "Psychic",
+        "Freeze-Dry",
+        "Light Screen"
+      ]
+    },
+    "munchlax": {
+      "moves": [
+        "Tackle",
+        "Lick",
+        "Rest",
+        "Screech"
+      ],
+      "item": "Leftovers"
+    },
+    "octillery": {
+      "moves": [
+        "Octazooka",
+        "Ice Beam",
+        "Constrict",
+        "Bubble Beam"
+      ]
+    },
+    "onix": {
+      "moves": [
+        "Rock Slide",
+        "Bind",
+        "Harden",
+        "Dig"
+      ]
+    },
+    "overqwil": {
+      "moves": [
+        "Barb Barrage",
+        "Crunch",
+        "Poison Jab",
+        "Aqua Jet"
+      ]
+    },
+    "perrserker": {
+      "moves": [
+        "Metal Claw",
+        "Fury Swipes",
+        "Iron Head",
+        "Screech"
+      ]
+    },
+    "pichu": {
+      "moves": [
+        "Thunder Shock",
+        "Charm",
+        "Tail Whip",
+        "Sweet Kiss"
+      ]
+    },
+    "pikachu": {
+      "moves": [
+        "Thunderbolt",
+        "Quick Attack",
+        "Thunder Wave",
+        "Iron Tail"
+      ],
+      "item": "Light Ball"
+    },
+    "pinsir": {
+      "moves": [
+        "Vice Grip",
+        "Guillotine",
+        "Submission",
+        "Swords Dance"
+      ]
+    },
+    "politoed": {
+      "moves": [
+        "Surf",
+        "Body Slam",
+        "Hypnosis",
+        "Perish Song"
+      ],
+      "item": "King's Rock"
+    },
+    "porygon": {
+      "moves": [
+        "Tackle",
+        "Conversion",
+        "Psybeam",
+        "Recover"
+      ]
+    },
+    "porygon-z": {
+      "moves": [
+        "Tri Attack",
+        "Nasty Plot",
+        "Recover",
+        "Hyper Beam"
+      ]
+    },
+    "porygon2": {
+      "moves": [
+        "Tri Attack",
+        "Recover",
+        "Conversion",
+        "Psybeam"
+      ]
+    },
+    "quagsire": {
+      "moves": [
+        "Surf",
+        "Earthquake",
+        "Amnesia",
+        "Yawn"
+      ]
+    },
+    "quilava": {
+      "moves": [
+        "Flame Wheel",
+        "Quick Attack",
+        "Smokescreen",
+        "Swift"
+      ]
+    },
+    "qwilfish": {
+      "moves": [
+        "Pin Missile",
+        "Poison Sting",
+        "Water Gun",
+        "Minimize"
+      ]
+    },
+    "raichu": {
+      "moves": [
+        "Thunderbolt",
+        "Thunder",
+        "Quick Attack",
+        "Thunder Wave"
+      ]
+    },
+    "raikou": {
+      "moves": [
+        "Thunderbolt",
+        "Crunch",
+        "Quick Attack",
+        "Roar"
+      ]
+    },
+    "remoraid": {
+      "moves": [
+        "Water Gun",
+        "Psybeam",
+        "Aurora Beam",
+        "Bubble Beam"
+      ]
+    },
+    "rhydon": {
+      "moves": [
+        "Earthquake",
+        "Horn Drill",
+        "Rock Slide",
+        "Take Down"
+      ]
+    },
+    "rhyperior": {
+      "moves": [
+        "Earthquake",
+        "Rock Wrecker",
+        "Megahorn",
+        "Hammer Arm"
+      ]
+    },
+    "scizor": {
+      "moves": [
+        "Metal Claw",
+        "Fury Cutter",
+        "Swords Dance",
+        "Bullet Punch"
+      ]
+    },
+    "shuckle": {
+      "moves": [
+        "Withdraw",
+        "Wrap",
+        "Bide",
+        "Rest"
+      ],
+      "item": "Berry Juice"
+    },
+    "sirfetch'd": {
+      "moves": [
+        "Brick Break",
+        "Leaf Blade",
+        "Detect",
+        "Swords Dance"
+      ],
+      "item": "Stick"
+    },
+    "skarmory": {
+      "moves": [
+        "Steel Wing",
+        "Drill Peck",
+        "Sand Attack",
+        "Roost"
+      ]
+    },
+    "slowbro": {
+      "moves": [
+        "Psychic",
+        "Surf",
+        "Withdraw",
+        "Amnesia"
+      ]
+    },
+    "slowking": {
+      "moves": [
+        "Psychic",
+        "Surf",
+        "Swagger",
+        "Nasty Plot"
+      ],
+      "item": "King's Rock"
+    },
+    "slowpoke": {
+      "moves": [
+        "Confusion",
+        "Water Gun",
+        "Yawn",
+        "Disable"
+      ]
+    },
+    "smeargle": {
+      "moves": [
+        "Sketch",
+        "Tail Whip",
+        "Mimic",
+        "Odor Sleuth"
+      ]
+    },
+    "smoochum": {
+      "moves": [
+        "Powder Snow",
+        "Lovely Kiss",
+        "Confusion",
+        "Sweet Kiss"
+      ]
+    },
+    "sneasel": {
+      "moves": [
+        "Faint Attack",
+        "Icy Wind",
+        "Quick Attack",
+        "Screech"
+      ]
+    },
+    "sneasler": {
+      "moves": [
+        "Dire Claw",
+        "Close Combat",
+        "Poison Jab",
+        "Swords Dance"
+      ]
+    },
+    "snorlax": {
+      "moves": [
+        "Body Slam",
+        "Rest",
+        "Belly Drum",
+        "Hyper Beam"
+      ],
+      "item": "Leftovers"
+    },
+    "snubbull": {
+      "moves": [
+        "Bite",
+        "Charm",
+        "Play Rough",
+        "Scary Face"
+      ]
+    },
+    "squirtle": {
+      "moves": [
+        "Tackle",
+        "Water Gun",
+        "Withdraw",
+        "Bubble"
+      ]
+    },
+    "starmie": {
+      "moves": [
+        "Psychic",
+        "Surf",
+        "Recover",
+        "Rapid Spin"
+      ]
+    },
+    "steelix": {
+      "moves": [
+        "Iron Tail",
+        "Earthquake",
+        "Rock Slide",
+        "Iron Defense"
+      ]
+    },
+    "sudowoodo": {
+      "moves": [
+        "Mimic",
+        "Rock Slide",
+        "Slam",
+        "Faint Attack"
+      ]
+    },
+    "suicune": {
+      "moves": [
+        "Surf",
+        "Aurora Beam",
+        "Bite",
+        "Mist"
+      ]
+    },
+    "sylveon": {
+      "moves": [
+        "Draining Kiss",
+        "Disarming Voice",
+        "Moonblast",
+        "Calm Mind"
+      ]
+    },
+    "tangrowth": {
+      "moves": [
+        "Power Whip",
+        "Giga Drain",
+        "Ancient Power",
+        "Synthesis"
+      ]
+    },
+    "tauros": {
+      "moves": [
+        "Body Slam",
+        "Take Down",
+        "Rage",
+        "Horn Attack"
+      ]
+    },
+    "togekiss": {
+      "moves": [
+        "Air Slash",
+        "Dazzling Gleam",
+        "Aura Sphere",
+        "Roost"
+      ]
+    },
+    "togepi": {
+      "moves": [
+        "Metronome",
+        "Charm",
+        "Sweet Kiss",
+        "Growl"
+      ]
+    },
+    "togetic": {
+      "moves": [
+        "Metronome",
+        "Charm",
+        "Fly",
+        "Safeguard"
+      ]
+    },
+    "totodile": {
+      "moves": [
+        "Scratch",
+        "Water Gun",
+        "Bite",
+        "Rage"
+      ]
+    },
+    "typhlosion": {
+      "moves": [
+        "Flamethrower",
+        "Swift",
+        "Fire Blast",
+        "Quick Attack"
+      ]
+    },
+    "tyranitar": {
+      "moves": [
+        "Rock Slide",
+        "Crunch",
+        "Earthquake",
+        "Sandstorm"
+      ]
+    },
+    "tyrogue": {
+      "moves": [
+        "Tackle",
+        "Helping Hand",
+        "Fake Out",
+        "Foresight"
+      ]
+    },
+    "umbreon": {
+      "moves": [
+        "Faint Attack",
+        "Confuse Ray",
+        "Moonlight",
+        "Screech"
+      ]
+    },
+    "unown": {
+      "moves": [
+        "Hidden Power",
+        "",
+        "",
+        ""
+      ]
+    },
+    "ursaluna": {
+      "moves": [
+        "Headlong Rush",
+        "Earthquake",
+        "Body Slam",
+        "Rest"
+      ]
+    },
+    "vaporeon": {
+      "moves": [
+        "Surf",
+        "Ice Beam",
+        "Aurora Beam",
+        "Acid Armor"
+      ]
+    },
+    "venusaur": {
+      "moves": [
+        "Solar Beam",
+        "Razor Leaf",
+        "Sludge Bomb",
+        "Synthesis"
+      ]
+    },
+    "wartortle": {
+      "moves": [
+        "Water Gun",
+        "Bite",
+        "Rapid Spin",
+        "Protect"
+      ]
+    },
+    "weavile": {
+      "moves": [
+        "Night Slash",
+        "Ice Punch",
+        "Swords Dance",
+        "Fake Out"
+      ]
+    },
+    "weezing": {
+      "moves": [
+        "Sludge Bomb",
+        "Explosion",
+        "Smokescreen",
+        "Toxic"
+      ]
+    },
+    "wigglytuff": {
+      "moves": [
+        "Play Rough",
+        "Dazzling Gleam",
+        "Sing",
+        "Body Slam"
+      ]
+    },
+    "wobbuffet": {
+      "moves": [
+        "Counter",
+        "Mirror Coat",
+        "Safeguard",
+        "Destiny Bond"
+      ]
+    },
+    "wynaut": {
+      "moves": [
+        "Splash",
+        "Charm",
+        "Encore",
+        "Counter"
+      ]
+    },
+    "wyrdeer": {
+      "moves": [
+        "Psyshield Bash",
+        "Zen Headbutt",
+        "Take Down",
+        "Calm Mind"
+      ]
+    },
+    "yanmega": {
+      "moves": [
+        "Air Slash",
+        "Bug Buzz",
+        "Ancient Power",
+        "Double Team"
+      ]
+    },
+    "zapdos": {
+      "moves": [
+        "Thunderbolt",
+        "Thunder",
+        "Drill Peck",
+        "Light Screen"
+      ]
+    }
   }
 }

@@ -20,11 +20,6 @@ const speciesTable = moveData.species as {[species: string]: SpeciesEntry};
 // past this, higher levels change nothing.
 const MASTERY_LEVEL = 70;
 
-// How far up a curated species' signature moves come in. A freshly caught
-// moemon knows one of them and fills the rest with type basics; by 40 it has
-// the whole characteristic set.
-const SIGNATURE_UNLOCKS = [1, 12, 25, 40];
-
 // Stable per-species jitter, so two same-type moemon of the same level don't
 // come out with a byte-identical moveset.
 function speciesJitter(name: string): number {
@@ -81,14 +76,18 @@ export function defaultDetailsFor(species: string, level: number = DEFAULT_DETAI
     const primary = typeTable[types[0]] ?? typeTable[MoemonType.Normal];
     const jitter = speciesJitter(info.name);
 
+    // A curated set is the species' characteristic four, used whole at any
+    // level. It used to be filtered by level - the first N moves at low
+    // levels, the rest filled from the type pool - which quietly assumed
+    // every curated list ran basic to advanced. Half of them don't (an
+    // evolved species is generally written strongest-first), so a Lv.5
+    // Bulbasaur got Tackle and a Lv.5 Blastoise got Hydro Pump. There is no
+    // way to verify that ordering across 160 hand-written entries, so the
+    // contract is gone rather than silently half-kept: the level window now
+    // applies only where it can be trusted, to the ordered type pools.
     const curated = speciesTable[info.name.toLowerCase()];
     if (curated) {
-        const signature = curated.moves.filter(move => move.length > 0);
-        // A deliberately sparse entry (Ditto's Transform, Unown's Hidden
-        // Power) is the whole moveset at any level - don't pad it out.
-        const moves = signature.length < 4
-            ? signature
-            : fillWithBasics(signature, primary.moves, level);
+        const moves = curated.moves.filter(move => move.length > 0);
         return {nickname: '', level, moves: padToFour(moves), heldItem: curated.item ?? primary.item};
     }
 
@@ -105,16 +104,4 @@ export function defaultDetailsFor(species: string, level: number = DEFAULT_DETAI
         : windowForLevel(primary.moves, 4, level, jitter);
 
     return {nickname: '', level, moves: padToFour(moves), heldItem: primary.item};
-}
-
-// Signature moves come in as the member levels; any slot not yet earned is
-// filled from the basic end of its type pool.
-function fillWithBasics(signature: string[], pool: string[], level: number): string[] {
-    const earned = Math.max(SIGNATURE_UNLOCKS.filter(unlock => level >= unlock).length, 1);
-    const known = signature.slice(0, earned);
-    for (const move of pool) {
-        if (known.length >= 4) break;
-        if (!known.includes(move) && !signature.includes(move)) known.push(move);
-    }
-    return known;
 }

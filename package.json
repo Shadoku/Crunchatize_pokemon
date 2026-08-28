@@ -5,8 +5,10 @@
   "type": "module",
   "license": "UNLICENSED",
   "scripts": {
-    "dev": "vite",
-    "build": "tsc && vite build",
+    "sync-lore": "node scripts/sync-lore.mjs",
+    "bundle-card": "node scripts/bundle-card.mjs",
+    "dev": "yarn sync-lore && vite",
+    "build": "yarn sync-lore && tsc && vite build",
     "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
     "preview": "vite preview"
   },

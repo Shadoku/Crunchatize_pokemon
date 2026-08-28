@@ -1,42 +1,33 @@
-import loreData from "./assets/moemonLore.json";
+import speciesData from "./assets/moemonSpecies.json";
 import {MoemonType} from "./MoemonType";
 import {slugifySpecies} from "./slug";
 
 export interface SpeciesInfo {
     name: string;
     types: MoemonType[];
-    content: string;
 }
 
-interface LoreEntry {
+interface SpeciesRecord {
     name: string;
-    content: string;
-    constant: boolean;
-}
-
-const TYPE_TAG_PATTERN = /\ban? ([A-Za-z]+(?:\/[A-Za-z]+)?)-type girl/;
-
-function parseTypes(content: string): MoemonType[] {
-    const match = content.match(TYPE_TAG_PATTERN);
-    if (!match) return [];
-    return match[1]
-        .split('/')
-        .filter((token): token is MoemonType => (Object.values(MoemonType) as string[]).includes(token));
+    types: string[];
 }
 
 export function escapeRegex(value: string): string {
     return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
-// Species (non-constant entries) keyed by lowercase name; location/NPC/item
-// entries are 'constant' in the lorebook and aren't moemon party members.
+// Generated from lorebook/moemon-lore.json by scripts/sync-lore.mjs, which is
+// also what decides that an entry is a moemon at all (it carries a species
+// type tag) rather than a town, an item or a person. Keeping that rule in one
+// place is deliberate: the stage used to infer it from a flag that existed
+// only in its private copy of the book, so re-exporting the book from chub
+// turned every location and item into a catchable moemon.
 const speciesIndex: Map<string, SpeciesInfo> = new Map();
-for (const entry of Object.values(loreData.entries) as LoreEntry[]) {
-    if (entry.constant) continue;
-    speciesIndex.set(entry.name.toLowerCase(), {
-        name: entry.name,
-        types: parseTypes(entry.content),
-        content: entry.content
+for (const record of (speciesData.species as SpeciesRecord[])) {
+    speciesIndex.set(record.name.toLowerCase(), {
+        name: record.name,
+        types: record.types.filter((token): token is MoemonType =>
+            (Object.values(MoemonType) as string[]).includes(token))
     });
 }
 
@@ -52,7 +43,7 @@ const matchers: {name: string; regex: RegExp}[] = speciesNames
     .map(name => ({name, regex: new RegExp(`\\b${escapeRegex(name)}(?![A-Za-z0-9])`, 'i')}));
 
 export function getSpecies(name: string): SpeciesInfo | undefined {
-    return speciesIndex.get(name.toLowerCase());
+    return speciesIndex.get(name.trim().toLowerCase());
 }
 
 // Re-exported so existing callers can keep importing it from here.

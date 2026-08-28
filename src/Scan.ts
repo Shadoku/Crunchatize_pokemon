@@ -8,7 +8,7 @@
 // detection per line instead. Every line parses on its own, so a truncated or
 // partly-garbled reply still yields the lines that did arrive.
 
-export type SuggestionKind = 'party' | 'quest' | 'quest-done' | 'npc' | 'scene' | 'condition';
+export type SuggestionKind = 'party' | 'quest' | 'quest-done' | 'npc' | 'scene' | 'condition' | 'level';
 
 // A detection as it comes off the wire: a verb and its fields, with nothing
 // yet checked against the lorebook or the chat's own state.
@@ -45,7 +45,8 @@ const VERBS: {[verb: string]: SuggestionKind} = {
     RESOLVED: 'quest-done',
     NPC: 'npc',
     SCENE: 'scene',
-    CONDITION: 'condition'
+    CONDITION: 'condition',
+    LEVEL: 'level'
 };
 
 // A rambling model shouldn't be able to bury the panel. Well past what a
@@ -152,6 +153,7 @@ export function describeSuggestion(kind: SuggestionKind, value: string, detail: 
         case 'npc': return detail ? `Remember ${value} - ${detail}` : `Remember ${value}`;
         case 'scene': return `Scene: ${value}`;
         case 'condition': return `${value} is ${detail}`;
+        case 'level': return `${value} is now Lv.${detail}`;
         default: return value;
     }
 }

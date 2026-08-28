@@ -31,3 +31,5 @@ upload_response.json
 chub_auth_token.txt
 *.trash
 *.tgz
+# Built card bundles (yarn bundle-card)
+dist-cards/

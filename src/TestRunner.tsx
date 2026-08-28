@@ -41,9 +41,9 @@ export const TestStageRunner = <StageType extends StageBase<InitStateType, ChatS
         await stage.setState({someKey: 'A new value, even!'});
         refresh();
 
-        // Charizard is seeded into the party automatically from the character roster
-        // (see test-init.json); naming her here should make her the acting party member
-        // and pit her Fire typing against whatever domain the classifier picks for 'frozen'.
+        // Nothing joins the party on its own any more, so add Charizard from
+        // the panel first; naming her here should then make her the acting
+        // party member and put her held item in front of the narrator.
         const beforePromptResponse: Partial<StageResponse<ChatStateType, MessageStateType>> = await stage.beforePrompt({
             ...DEFAULT_MESSAGE, ...{
                 anonymizedId: "0",

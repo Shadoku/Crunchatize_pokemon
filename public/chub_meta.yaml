@@ -5,96 +5,109 @@
 project_name: "Crunchatize"
 
 # A short tagline to show in search.
-tagline: "Turn any Moemon chat into a party- and situation-driven RPG."
+tagline: "Party, bag and story tracking for a Moemon chat - and a switch between prose and full RPG."
 
-creator_notes: "
-Can't enjoy an organic role-playing narrative without the thrill of the meta?<br>
-Wondering why you're enduring some meaningless simulacrum of our equally meaningless reality when you could be gaming?<br>
-Worried you'll develop genuine feelings or exercise life-changing introspection if numbers and probabilities aren't artificially injected into your every experience?<br>
-Crunchatize may be the stage for you!<br>
-<br>
-**What's it do?**<br>
-This build of Crunchatize is wired up to a Moemon (moe-anthropomorphized Pokémon) lorebook. Instead of grading every input against one of eight
-generic human attributes, it looks at what's actually in play: who's in your party and what kind of scene you're in.
-<br><br>
-<img src=\"https://avatars.charhub.io/avatars/uploads/images/gallery/file/7564e258-4f34-4ebd-97d9-402ef0508c21/685eece8-d6c7-4a6a-8457-809c01040a11.png\" alt=\"Example Screenshot\" style=\"display: block; margin: auto; width: 40%; height: auto; max-width: 938px;\"/>
-<br><br>
-Unlike most chats, where you don't want the bot to speak or act for your character,
-this stage asks you to forfeit some agency over the details of your actions;
-the bot will be specifically instructed to take your check result and paraphrase your choices as it narrates, rather than accept your input as canon.
-As a result, you may find that you are better off simply describing the nature or attitude of the action you intend to take and allowing the bot to fill in the details.
-<br><br>
-Every action rolls a percentage behind the scenes - the chance the attempt comes off - and hands it to the narrator, which reads it as a
-gradient: a high number goes well, a low one goes badly, and a middling one lands somewhere in between. Nothing is asked to pick a verdict
-from a list, so nothing gets stuck on one. There's no XP grind or leveling; your 'build' is just whichever moemon you've got with you. The
-number never appears in the chat - only the panel shows it, so the narration reads cleanly while you can still see what you rolled. The
-difficulty setting shifts the number directly: positive is kinder, negative is harsher.
-<br><br>
-**Party tracking**<br>
-The stage keeps a little panel (visible alongside the chat) showing each player's current party. Nothing joins it on its own: moemon arrive
-either because you added them by hand, or because the story scan noticed one joining you and you accepted the suggestion. That is deliberate
-- matching every species named in the prose meant every wild moemon, every opponent and every moemon somebody merely mentioned ended up on
-your roster. The panel also shows your last roll.
-<br><br>
-**Keeping the story straight**<br>
-Long chats drift. The panel also tracks the things a narrator otherwise forgets once they scroll out of context: open plot threads, the
-characters you keep running into (and how they feel about you, set from the panel), and where and when the current scene is happening. These
-are folded into the same periodic reminder as your party and bag, so they cost tokens on an interval rather than every turn.
-<br><br>
-Your moemon also carry a condition. A roll in the bottom five knocks the acting moemon down a peg - fine, then hurt, then fainted - and one
-in the top five pulls her back up. It colours how the narrator plays her rather than blocking anything outright, and you can always set it by
-hand from the panel if the story says otherwise. Whatever a moemon is holding goes to the narrator too, so a held item can actually matter
-instead of being decoration.
-<br><br>
-**It keeps up on its own**<br>
-Every ten messages (configurable, or off), the stage quietly reads back over what's happened and looks for things worth tracking that you
-haven't written down: a moemon that joined, a goal you picked up, a name that keeps coming back, a change of scene. It never just merges
-what it finds - guessing from prose gets things wrong, which is why the panel has manual controls in the first place - so each finding
-turns up at the top of the panel as a suggestion with a tick and a cross. There's a Scan now button if you'd rather ask for it directly.
-The scan runs in the background, so nothing waits on it; suggestions simply appear when they're ready.
-<br><br>
-**Carrying a party between chats**<br>
-The panel's "Save data" section exports your roster, bag, threads, characters and scene as a block of text you can paste into another chat
-to pick up where you left off.
-<br><br>
-I've tagged the stage NSFW, but there isn't anything in the stage that would render a wholesome chat inappropriate. However, my example bot is NSFW, and I'm sure other bots that attach this stage could be, too.
-<br><br>
-**Updates:**<br>
-08/27/2026 - Two fixes to the stage guessing badly. Moemon no longer join your party just for being named in the story - wild ones,
-opponents and moemon somebody merely mentioned were all being recruited - so the roster now fills only from a scan suggestion you accept or
-from your own hand; anything already wrongly added is still there to remove. And checks no longer ask the model to pick one of five verdicts,
-which it answered 'no check' to almost every time: an action now rolls a straight percentage chance of success and the narrator reads it as a
-gradient. The difficulty setting shifts that number directly, and the roll/no-roll toggle works as before.<br>
-08/27/2026 - Fixed Scan now doing nothing. The scan was reading a copy of the story the stage kept for itself, which was empty on any chat
-opened fresh - so the button quietly did nothing at all. It now asks the platform for the chat history instead, works on the first click,
-and tells you what it did rather than leaving you guessing between 'found nothing' and 'broken'.<br>
-08/27/2026 - The stage now scans the recent story every ten messages (configurable, or on demand with Scan now) for party, thread,
-character and scene changes you haven't recorded, and offers what it finds as suggestions to accept or reject rather than merging them
-itself. The scan runs in the background, so the chat never waits on it, and turning a suggestion down keeps it from being raised again
-for a while.<br>
-08/27/2026 - Added condition tracking (a critical result knocks a moemon down or picks her back up), and started telling the judge what a
-moemon is holding. The panel now also tracks open plot threads, recurring characters and how they feel about you, and the current scene -
-all folded into the existing roster reminder. Added export/import, so a party can move between chats.<br>
-08/27/2026 - Replaced the external zero-shot classifier with a d20 roll judged directly by the same model powering your chat: one call instead of two, no more third-party backend, and the roll never appears in chat - only in the panel. Dropped the type-matchup/domain modifier system in favor of letting the bot judge holistically.<br>
-08/25/2026 - Reworked the stage around a Moemon lorebook: party tracking (with a small panel UI for manual add/remove), and checks now driven by party type matchups and scene domain instead of the old eight-stat skill system. Leveling/XP removed.<br>
-06/26/2025 - Hugging Face CORS issues broke the stage for a few days; I wrote a new client for it.<br>
-08/05/2025 - Forced to update by Hugging Face.<br>
-07/18/2025 - Added a configurable difficulty modifier that applies to all rolls.<br>
-06/06/2025 - Trimming 'fake' statblocks out of LLM responses. Looking at a multiplayer bug.<br>
-04/28/2025 - This stage should now support multiplayer chats. Made some small revisions to stat determination, as well.<br>
-03/30/2025 - Updated the HF backend this stage leverages and had to update the Gradio client here. I broke inference for several hours but it's back up and should perform better than before. I might toy with other models, but I'm pretty happy with the performance boost for now.<br>
-03/17/2025 - Allowing the stage to attempt to reconnect to the backend when something goes wrong, instead of falling back to the local model long-term. Minor visual update and made some changes to the stat classifier to hopefully get better results.<br>
-11/23/2024 - Sped things up a bit by kicking off both assessments instead of waiting for one before starting the other.<br>
-11/03/2024 - Updating some dependencies; nothing exciting.<br>
-08/29/2024 - The backend model has changed, and the prompts in the stage have been updated; I think the results have improved, 
-but I'm continuing to toy with the backend as I work on my next stage, which leverages the same endpoints.<br>
-08/27/2024 - Improved stage loading to no longer rely on loading the local model straight away. 
-I am doing some experimentation with the backend, so this stage may have to resort to the local model more frequently. 
-Hopefully, these experiments bear fruit, and I can improve the inferences for this stage, but in the interim, the stage may be a little less stable as it falls back to local inference.<br>
-08/16/2024 - Made critical successes also grant an XP point, the same as failures do, just so they feel extra good.<br>
-08/15/2024 - Added critical successes; when you roll double sixes, the bot is given instructions to make your success a little over-the-top. Also color-coded some outcome stuff for fun.<br>
-08/14/2024 - Partially swapped the inference calls to a hosted model that is a larger size. 
-"
+creator_notes: |
+  Can't enjoy an organic role-playing narrative without the thrill of the meta?<br>
+  Wondering why you're enduring some meaningless simulacrum of our equally meaningless reality when you could be gaming?<br>
+  Worried you'll develop genuine feelings or exercise life-changing introspection if numbers and probabilities aren't artificially injected into your every experience?<br>
+  Crunchatize may be the stage for you!<br>
+  <br>
+  **What's it do?**<br>
+  This build of Crunchatize is one third of a set: the stage, the <b>Moemon - Takane Region</b> lorebook, and the <b>Moémon Adventure RPG - Takane</b>
+  character card. Each works alone; together they're built to stay out of each other's way. The stage owns your party, bag, threads and scene and
+  tells the narrator about them. The lorebook owns the region. The card runs the story and the battle numbers.
+  <br><br>
+  <img src="https://avatars.charhub.io/avatars/uploads/images/gallery/file/7564e258-4f34-4ebd-97d9-402ef0508c21/685eece8-d6c7-4a6a-8457-809c01040a11.png" alt="Example Screenshot" style="display: block; margin: auto; width: 40%; height: auto; max-width: 938px;"/>
+  <br><br>
+  Unlike most chats, where you don't want the bot to speak or act for your character,
+  this stage asks you to forfeit some agency over the details of your actions;
+  the bot will be specifically instructed to take your check result and paraphrase your choices as it narrates, rather than accept your input as canon.
+  As a result, you may find that you are better off simply describing the nature or attitude of the action you intend to take and allowing the bot to fill in the details.
+  <br><br>
+  Every action rolls a percentage behind the scenes - the chance the attempt comes off - and hands it to the narrator, which reads it as a
+  gradient: a high number goes well, a low one goes badly, and a middling one lands somewhere in between. Nothing is asked to pick a verdict
+  from a list, so nothing gets stuck on one. There's no XP grind or leveling; your 'build' is just whichever moemon you've got with you. The
+  number never appears in the chat - only the panel shows it, so the narration reads cleanly while you can still see what you rolled. The
+  difficulty setting shifts the number directly: positive is kinder, negative is harsher.
+  <br><br>
+  **Prose, Story or RPG**<br>
+  The switch at the top of the panel decides how much game is showing, and you can flip it mid-scene. <b>Prose</b> is a straight novel: no stat
+  blocks, no dice, nothing adjudicated. <b>Story</b> (the default) leads with prose and lets a stat block appear once a battle actually starts.
+  <b>RPG</b> shows a readout every time a value moves and sends the narrator your full movesets so the block and the panel agree. The narrator is
+  told when the setting changes and not otherwise, so switching costs one line rather than a running tax.
+  <br><br>
+  **Party tracking**<br>
+  The stage keeps a little panel (visible alongside the chat) showing each player's current party. Nothing joins it on its own: moemon arrive
+  either because you added them by hand, or because the story scan noticed one joining you and you accepted the suggestion. That is deliberate
+  - matching every species named in the prose meant every wild moemon, every opponent and every moemon somebody merely mentioned ended up on
+  your roster. Six is the limit, same as the card narrates. The star on a row picks your active moemon: she's the one the narrator sends out
+  and the one the stat block leads with. The panel also shows your last roll.
+  <br><br>
+  **Keeping the story straight**<br>
+  Long chats drift. The panel also tracks the things a narrator otherwise forgets once they scroll out of context: open plot threads, the
+  characters you keep running into (and how they feel about you, set from the panel), and where and when the current scene is happening. These
+  are folded into the same periodic reminder as your party and bag, so they cost tokens on an interval rather than every turn.
+  <br><br>
+  Your moemon also carry a condition. A roll in the bottom five knocks the acting moemon down a peg - fine, then hurt, then fainted - and one
+  in the top five pulls her back up. It colours how the narrator plays her rather than blocking anything outright, and you can always set it by
+  hand from the panel if the story says otherwise. Whatever a moemon is holding goes to the narrator too, so a held item can actually matter
+  instead of being decoration.
+  <br><br>
+  **It keeps up on its own**<br>
+  Every ten messages (configurable, or off), the stage quietly reads back over what's happened and looks for things worth tracking that you
+  haven't written down: a moemon that joined, a goal you picked up, a name that keeps coming back, a change of scene, a moemon who levelled. It never just merges
+  what it finds - guessing from prose gets things wrong, which is why the panel has manual controls in the first place - so each finding
+  turns up at the top of the panel as a suggestion with a tick and a cross. There's a Scan now button if you'd rather ask for it directly.
+  The scan runs in the background, so nothing waits on it; suggestions simply appear when they're ready.
+  <br><br>
+  **Carrying a party between chats**<br>
+  The panel's "Save data" section exports your roster, bag, threads, characters and scene as a block of text you can paste into another chat
+  to pick up where you left off.
+  <br><br>
+  I've tagged the stage NSFW, but there isn't anything in the stage that would render a wholesome chat inappropriate. However, my example bot is NSFW, and I'm sure other bots that attach this stage could be, too.
+  <br><br>
+  **Updates:**<br>
+  08/28/2026 - Retuned the whole set to work together. New <b>Prose / Story / RPG</b> switch decides how much of the game shows, and the narrator
+  is told which one is in force. Your party now has an <b>active moemon</b> (the star on a row) and a six-member limit, and the roster note the
+  narrator gets names her. Conditions set from the panel now survive a reload. Two silent bugs fixed: replies were being truncated at the first
+  horizontal rule, code fence or *** in the text - which on an RPG card ate the stat block - and the panel readout under each message was
+  emitting a broken code fence. The stage no longer ships its own copy of the lorebook; it derives its species list from the shipped book at
+  build time, so re-exporting the book can't turn every town and item into a catchable moemon.<br>
+  08/27/2026 - Two fixes to the stage guessing badly. Moemon no longer join your party just for being named in the story - wild ones,
+  opponents and moemon somebody merely mentioned were all being recruited - so the roster now fills only from a scan suggestion you accept or
+  from your own hand; anything already wrongly added is still there to remove. And checks no longer ask the model to pick one of five verdicts,
+  which it answered 'no check' to almost every time: an action now rolls a straight percentage chance of success and the narrator reads it as a
+  gradient. The difficulty setting shifts that number directly, and the roll/no-roll toggle works as before.<br>
+  08/27/2026 - Fixed Scan now doing nothing. The scan was reading a copy of the story the stage kept for itself, which was empty on any chat
+  opened fresh - so the button quietly did nothing at all. It now asks the platform for the chat history instead, works on the first click,
+  and tells you what it did rather than leaving you guessing between 'found nothing' and 'broken'.<br>
+  08/27/2026 - The stage now scans the recent story every ten messages (configurable, or on demand with Scan now) for party, thread,
+  character and scene changes you haven't recorded, and offers what it finds as suggestions to accept or reject rather than merging them
+  itself. The scan runs in the background, so the chat never waits on it, and turning a suggestion down keeps it from being raised again
+  for a while.<br>
+  08/27/2026 - Added condition tracking (a critical result knocks a moemon down or picks her back up), and started telling the judge what a
+  moemon is holding. The panel now also tracks open plot threads, recurring characters and how they feel about you, and the current scene -
+  all folded into the existing roster reminder. Added export/import, so a party can move between chats.<br>
+  08/27/2026 - Replaced the external zero-shot classifier with a d20 roll judged directly by the same model powering your chat: one call instead of two, no more third-party backend, and the roll never appears in chat - only in the panel. Dropped the type-matchup/domain modifier system in favor of letting the bot judge holistically.<br>
+  08/25/2026 - Reworked the stage around a Moemon lorebook: party tracking (with a small panel UI for manual add/remove), and checks now driven by party type matchups and scene domain instead of the old eight-stat skill system. Leveling/XP removed.<br>
+  06/26/2025 - Hugging Face CORS issues broke the stage for a few days; I wrote a new client for it.<br>
+  08/05/2025 - Forced to update by Hugging Face.<br>
+  07/18/2025 - Added a configurable difficulty modifier that applies to all rolls.<br>
+  06/06/2025 - Trimming 'fake' statblocks out of LLM responses. Looking at a multiplayer bug.<br>
+  04/28/2025 - This stage should now support multiplayer chats. Made some small revisions to stat determination, as well.<br>
+  03/30/2025 - Updated the HF backend this stage leverages and had to update the Gradio client here. I broke inference for several hours but it's back up and should perform better than before. I might toy with other models, but I'm pretty happy with the performance boost for now.<br>
+  03/17/2025 - Allowing the stage to attempt to reconnect to the backend when something goes wrong, instead of falling back to the local model long-term. Minor visual update and made some changes to the stat classifier to hopefully get better results.<br>
+  11/23/2024 - Sped things up a bit by kicking off both assessments instead of waiting for one before starting the other.<br>
+  11/03/2024 - Updating some dependencies; nothing exciting.<br>
+  08/29/2024 - The backend model has changed, and the prompts in the stage have been updated; I think the results have improved,
+  but I'm continuing to toy with the backend as I work on my next stage, which leverages the same endpoints.<br>
+  08/27/2024 - Improved stage loading to no longer rely on loading the local model straight away.
+  I am doing some experimentation with the backend, so this stage may have to resort to the local model more frequently.
+  Hopefully, these experiments bear fruit, and I can improve the inferences for this stage, but in the interim, the stage may be a little less stable as it falls back to local inference.<br>
+  08/16/2024 - Made critical successes also grant an XP point, the same as failures do, just so they feel extra good.<br>
+  08/15/2024 - Added critical successes; when you roll double sixes, the bot is given instructions to make your success a little over-the-top. Also color-coded some outcome stuff for fun.<br>
+  08/14/2024 - Partially swapped the inference calls to a hosted model that is a larger size.
 
 # 'PUBLIC', 'PRIVATE', or 'UNLISTED'.
 visibility: 'PUBLIC'
@@ -125,12 +138,25 @@ config_schema:
   title: Crunchatize Configuration
   type: object
   properties:
+    playMode:
+      title: Play Mode
+      description: >-
+        How much of the game shows by default. Prose is a straight novel with
+        no readouts and no dice. Story leads with prose and shows a stat block
+        once a battle starts. RPG shows one whenever a value moves, and sends
+        the narrator full movesets. Changeable at any time from the panel;
+        this is only where a new chat starts.
+      type: string
+      enum: ['prose', 'story', 'rpg']
+      default: 'story'
     difficultyModifier:
       title: Difficulty Modifier
       description: >-
-        Nudges how generously or strictly the bot judges every check. Positive
-        leans generous, negative leans strict, 0 is neutral.
+        Shifts every roll by five percentage points a step. Positive is kinder,
+        negative is harsher, 0 is neutral.
       type: integer
+      minimum: -6
+      maximum: 6
       default: 0
     rosterReminderInterval:
       title: Roster Reminder Interval
@@ -139,6 +165,8 @@ config_schema:
         The party panel beneath the chat is for you and is never sent to the bot;
         this is what the bot actually sees. Set to 0 to never remind it.
       type: integer
+      minimum: 0
+      maximum: 50
       default: 6
     scanInterval:
       title: Story Scan Interval
@@ -148,30 +176,81 @@ config_schema:
         the panel as a suggestion to accept or reject, never applied on its own.
         Set to 0 to only scan when you press Scan now.
       type: integer
+      minimum: 0
+      maximum: 50
       default: 10
 
 # The schema of the state that you store.
 # This isn't needed even if you do store state,
 #   and is here more for future use cases to
 #   optimize storage.
+# What the stage actually stores. Message state is per-point-in-the-story and
+# rewinds with a swipe; chat state is the player's own bookkeeping and does not.
 state_schema:
   init:
     type: object
-    properties:
-      grid:
-        type: string
+    properties: {}
   message:
     type: object
-    properties:
-      angry:
-        type: boolean
-        default: true
+    description: Keyed by player id.
+    additionalProperties:
+      type: object
+      properties:
+        autoParty:
+          type: array
+          items:
+            type: object
+        lastOutcome:
+          type: object
+        lastOutcomePrompt:
+          type: string
+        lastModeSent:
+          type: string
+        turnsSinceRoster:
+          type: integer
+        turnsSinceScan:
+          type: integer
+        partyStatus:
+          type: object
   chat:
     type: object
-    properties:
-      visited:
-        type: array
-        items:
+    description: Keyed by player id.
+    additionalProperties:
+      type: object
+      properties:
+        manualParty:
+          type: array
+          items:
+            type: object
+        inventory:
+          type: array
+          items:
+            type: object
+        quests:
+          type: array
+          items:
+            type: object
+        npcs:
+          type: array
+          items:
+            type: object
+        suggestions:
+          type: array
+          items:
+            type: object
+        dismissals:
+          type: array
+          items:
+            type: object
+        pendingConditions:
+          type: object
+        environment:
+          type: string
+        mode:
+          type: string
+        rollEnabled:
+          type: boolean
+        scanCount:
           type: integer
 
 # Whether to publish as 'Anonymous' instead of under your username.
