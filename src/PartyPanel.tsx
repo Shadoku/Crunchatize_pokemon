@@ -8,6 +8,7 @@ import {itemCategories} from "./Inventory";
 import {NpcEntry, describeAffinity, AFFINITY_MIN, AFFINITY_MAX} from "./Npc";
 import {SuggestionKind} from "./Scan";
 import {Outcome, rollBand, describeRoll} from "./Outcome";
+import {DebugEntry} from "./DebugLog";
 
 function clampLevel(value: string): number {
     return Math.min(Math.max(Math.floor(Number(value)) || 1, 1), 100);
@@ -53,6 +54,8 @@ export function PartyPanel({stage}: {stage: Stage}): ReactElement {
     // Which portrait is open full-size, if any. Held here rather than per row
     // so the viewer can cover the whole panel.
     const [viewing, setViewing] = useState<string | null>(null);
+    // The debug drawer, opened from the corner button.
+    const [showingDebug, setShowingDebug] = useState(false);
 
     // The anchors file arrives after first paint; re-render when it lands so
     // portraits settle into their configured crop.
@@ -77,6 +80,86 @@ export function PartyPanel({stage}: {stage: Stage}): ReactElement {
                 />
             ))}
             {viewing && <PortraitViewer species={viewing} onClose={() => setViewing(null)} />}
+            <button
+                type="button"
+                className="crunchatize-debug-open"
+                title="Show the scan log"
+                aria-label="Show the scan log"
+                onClick={() => setShowingDebug(true)}
+            >{'{ }'}</button>
+            {showingDebug && <DebugDrawer stage={stage} onClose={() => setShowingDebug(false)} />}
+        </div>
+    );
+}
+
+// What the scan did, in detail. A stage runs in a sandboxed cross-origin
+// iframe, so the browser console is out of reach for most players on desktop
+// and all of them on mobile; without this there is no way to see why an
+// external model isn't answering.
+function DebugDrawer({stage, onClose}: {stage: Stage; onClose: () => void}): ReactElement {
+    const [, setTick] = useState(0);
+    // Entries arrive from a scan running in the background, so the drawer
+    // subscribes rather than reading once.
+    useEffect(() => stage.debug.onChanged(() => setTick(tick => tick + 1)), [stage]);
+
+    useEffect(() => {
+        const onKey = (event: KeyboardEvent) => {
+            if (event.key === 'Escape') onClose();
+        };
+        window.addEventListener('keydown', onKey);
+        return () => window.removeEventListener('keydown', onKey);
+    }, [onClose]);
+
+    const [copied, setCopied] = useState(false);
+    async function copy() {
+        setCopied(await copyToClipboard(stage.debug.asText()));
+    }
+
+    // Newest first: the reason a scan just failed is what the drawer was
+    // opened for, and it should not be at the bottom of a long scroll.
+    const entries = [...stage.debug.entries].reverse();
+
+    return (
+        <div className="crunchatize-debug" role="dialog" aria-label="Scan log">
+            <div className="crunchatize-debug-bar">
+                <span className="crunchatize-debug-title">Scan log</span>
+                <button type="button" onClick={copy}>{copied ? 'Copied' : 'Copy'}</button>
+                <button type="button" onClick={() => { stage.debug.clear(); setCopied(false); }}>Clear</button>
+                <button type="button" onClick={onClose} aria-label="Close the scan log">×</button>
+            </div>
+            <div className="crunchatize-debug-body">
+                {entries.length === 0
+                    ? <div className="crunchatize-debug-empty">
+                        Nothing logged yet. Run a scan (or send a message) and what the
+                        scan does will show up here.
+                    </div>
+                    : entries.map(entry => <DebugRow key={entry.id} entry={entry} />)}
+            </div>
+        </div>
+    );
+}
+
+// One entry. The label is always visible; the body - a raw reply, an error, a
+// whole prompt - is behind a disclosure, so a long detail doesn't bury the
+// entries around it.
+function DebugRow({entry}: {entry: DebugEntry}): ReactElement {
+    const [open, setOpen] = useState(entry.level === 'error');
+
+    return (
+        <div className={`crunchatize-debug-entry is-${entry.level}`}>
+            <div className="crunchatize-debug-head">
+                <span className="crunchatize-debug-time">{entry.time}</span>
+                <span className="crunchatize-debug-label">{entry.label}</span>
+                {entry.detail && (
+                    <button
+                        type="button"
+                        className="crunchatize-debug-toggle"
+                        aria-expanded={open}
+                        onClick={() => setOpen(!open)}
+                    >{open ? 'hide' : 'show'}</button>
+                )}
+            </div>
+            {entry.detail && open && <pre className="crunchatize-debug-detail">{entry.detail}</pre>}
         </div>
     );
 }

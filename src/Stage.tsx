@@ -23,6 +23,7 @@ import {
 } from "./Scan";
 import {ExternalScanConfig, readExternalConfig, scanExternally} from "./External";
 import {StoryEntry, parseStoryLog, appendStoryEntry, renderTranscript} from "./StoryLog";
+import {DebugLog} from "./DebugLog";
 import {PartyPanel} from "./PartyPanel";
 
 type MessageStateType = any;
@@ -240,6 +241,10 @@ export class Stage extends StageBase<InitStateType, ChatStateType, MessageStateT
     // filled it in; null otherwise, which is the whole of the "is it on?"
     // check - see readExternalConfig.
     externalScan: ExternalScanConfig|null;
+    // What the scan did, in detail, for the panel's debug drawer. Declared
+    // with an initialiser so it exists before the constructor body runs -
+    // reading the config is the first thing that writes to it.
+    debug: DebugLog = new DebugLog();
     // The recent story, kept only because an external scan has no other way
     // to see it (see StoryLog.ts) - the built-in scan asks the platform for
     // the history instead. One log rather than one per player: everyone in a
@@ -267,7 +272,7 @@ export class Stage extends StageBase<InitStateType, ChatStateType, MessageStateT
         this.rosterInterval = Math.max(config?.rosterReminderInterval ?? DEFAULT_ROSTER_INTERVAL, 0);
         this.scanInterval = Math.max(config?.scanInterval ?? DEFAULT_SCAN_INTERVAL, 0);
         this.defaultMode = parseMode(config?.playMode);
-        this.externalScan = readExternalConfig(config);
+        this.externalScan = readExternalConfig(config, this.debug);
         this.chatState = chatState ?? {};
 
         for (const user of Object.values(this.users)) {
@@ -832,6 +837,7 @@ export class Stage extends StageBase<InitStateType, ChatStateType, MessageStateT
 
         this.scanning.add(anonymizedId);
         this.notifySuggestionsChanged();
+        this.debug.info(`Scan started for ${this.users[anonymizedId]?.name || anonymizedId}`);
         try {
             let detections: RawDetection[]|null = null;
             let source: 'external' | 'builtin' = 'builtin';
@@ -850,11 +856,14 @@ export class Stage extends StageBase<InitStateType, ChatStateType, MessageStateT
                     // same remedy here, so it is logged for the player's
                     // console and the chat's own model takes the scan.
                     console.log(error);
+                    this.debug.error('External scan failed - falling back to the chat\'s own model.',
+                        error instanceof Error ? error.message : String(error));
                     fellBack = true;
                 }
             }
 
             if (detections == null) {
+                this.debug.info('Asking the chat\'s own model for the scan.');
                 const response = await this.withTimeout(
                     this.generator.textGen({
                         prompt: this.buildScanPrompt(anonymizedId),
@@ -870,12 +879,27 @@ export class Stage extends StageBase<InitStateType, ChatStateType, MessageStateT
                 // textGen resolves null on failure rather than throwing, so
                 // tell a dead generation apart from one that simply found
                 // nothing.
-                if (response?.result == null) return {ok: false, found: 0, reason: 'failed', source, fellBack, noStoryYet};
+                if (response?.result == null) {
+                    this.debug.error('The chat\'s own model returned nothing. The scan found nothing to offer.');
+                    return {ok: false, found: 0, reason: 'failed', source, fellBack, noStoryYet};
+                }
 
+                this.debug.info('The chat\'s own model replied', response.result);
                 detections = parseScanOutput(response.result);
+                this.debug.info(`Parsed ${detections.length} finding${detections.length === 1 ? '' : 's'} from the reply`,
+                    detections.map(one => `${one.kind} | ${one.value}${one.detail ? ` | ${one.detail}` : ''}`).join('\n') || undefined);
             }
 
             const found = this.filterDetections(anonymizedId, detections);
+            // The gap between the two counts is the interesting part: a
+            // finding is dropped when the lorebook doesn't know the species,
+            // when it is already tracked, or when the player turned it down
+            // recently - and from the panel all three look like "found
+            // nothing".
+            this.debug.info(`Scan finished: ${found.length} of ${detections.length} finding${detections.length === 1 ? '' : 's'} offered as suggestions`,
+                found.length < detections.length
+                    ? 'The rest were already tracked, unknown to the lorebook, or recently dismissed.'
+                    : undefined);
 
             // Read through patchChatState rather than a snapshot taken before
             // the await: a panel edit made while the scan was in flight is
@@ -892,6 +916,7 @@ export class Stage extends StageBase<InitStateType, ChatStateType, MessageStateT
             return {ok: true, found: found.length, source, fellBack, noStoryYet};
         } catch (error) {
             console.log(error);
+            this.debug.error('Scan failed.', error instanceof Error ? error.message : String(error));
             return {ok: false, found: 0, reason: 'failed'};
         } finally {
             this.scanning.delete(anonymizedId);
@@ -911,7 +936,11 @@ export class Stage extends StageBase<InitStateType, ChatStateType, MessageStateT
         if (!config) return null;
 
         const transcript = renderTranscript(this.storyLog);
-        if (!transcript.trim()) return null;
+        if (!transcript.trim()) {
+            this.debug.warn('No story recorded yet, so there is nothing to send to the external model. '
+                + 'The log fills as messages go by once the external scan is switched on.');
+            return null;
+        }
 
         // Aborted as well as timed out: withTimeout only stops the stage
         // waiting, and a request left running would still spend the player's
@@ -924,7 +953,8 @@ export class Stage extends StageBase<InitStateType, ChatStateType, MessageStateT
                     config,
                     this.buildExternalScanInstructions(anonymizedId),
                     transcript,
-                    controller.signal
+                    controller.signal,
+                    this.debug
                 ),
                 SCAN_TIMEOUT_MS
             );

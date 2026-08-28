@@ -226,13 +226,15 @@ config_schema:
     externalScanEndpoint:
       title: External Scan Endpoint
       description: >-
-        Where to send the scan. Leave as-is for OpenRouter. Any OpenAI-shaped
-        /chat/completions endpoint works, so you can point this at a proxy of
-        your own and keep the real key off your device. Must be https, and must
-        allow browser requests - the stage runs in your browser, so an endpoint
-        without CORS headers cannot be reached from it.
+        Where to send the scan. Leave as-is for OpenRouter. https:// is assumed
+        and added for you. Any OpenAI-shaped /chat/completions endpoint works,
+        so you can point this at a proxy of your own and keep the real key off
+        your device. It must allow browser requests - the stage runs in your
+        browser, so an endpoint without CORS headers cannot be reached from it.
+        If this box shows anything other than a hostname, clear it: blank falls
+        back to OpenRouter.
       type: string
-      default: 'https://openrouter.ai/api/v1'
+      default: 'openrouter.ai/api/v1'
     externalScanMaxTokens:
       title: External Scan Reply Length
       description: >-

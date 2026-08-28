@@ -173,6 +173,153 @@ $type-colors: (
 }
 
 // Full portrait, over the whole panel.
+// The scan log's corner button and drawer. Deliberately quiet: it sits over
+// the panel all the time, so it reads as a small mark until it's wanted.
+.crunchatize-debug-open {
+  position: fixed;
+  right: 0.45rem;
+  bottom: 0.45rem;
+  z-index: 40;
+  cursor: pointer;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.72rem;
+  line-height: 1;
+  padding: 0.25rem 0.35rem;
+  opacity: 0.45;
+  color: $ink-dim;
+  background-color: $surface-raised;
+  border: 1px solid $line;
+  border-radius: 0.3rem;
+
+  &:hover {
+    opacity: 1;
+    color: $ink;
+    border-color: $ink-dim;
+  }
+}
+
+.crunchatize-debug {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  flex-direction: column;
+  // Fully opaque: the panel underneath is busy, and a log is read rather
+  // than glanced at.
+  background-color: $surface;
+}
+
+.crunchatize-debug-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex: 0 0 auto;
+  padding: 0.45rem 0.55rem;
+  border-bottom: 1px solid $line;
+
+  button {
+    cursor: pointer;
+    font: inherit;
+    font-size: 0.8rem;
+    line-height: 1;
+    padding: 0.25rem 0.45rem;
+    color: $ink-dim;
+    background-color: $surface-raised;
+    border: 1px solid $line;
+    border-radius: 0.3rem;
+
+    &:hover {
+      color: $ink;
+      border-color: $ink-dim;
+    }
+  }
+}
+
+.crunchatize-debug-title {
+  flex: 1 1 auto;
+  font-size: 0.85rem;
+  font-weight: 650;
+  color: $ink;
+}
+
+.crunchatize-debug-body {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  padding: 0.4rem 0.55rem 0.8rem;
+}
+
+.crunchatize-debug-empty {
+  font-size: 0.8rem;
+  color: $ink-dim;
+  padding: 0.6rem 0;
+}
+
+.crunchatize-debug-entry {
+  padding: 0.35rem 0;
+  border-bottom: 1px solid rgba(51, 58, 77, 0.5);
+
+  // A coloured edge rather than coloured text: the label stays readable and
+  // the eye still finds the failures on a long list.
+  &.is-warn .crunchatize-debug-label { color: #f0c05a; }
+  &.is-error .crunchatize-debug-label { color: #ff8b7d; }
+}
+
+.crunchatize-debug-head {
+  display: flex;
+  align-items: baseline;
+  gap: 0.4rem;
+}
+
+.crunchatize-debug-time {
+  flex: 0 0 auto;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.68rem;
+  color: $ink-dim;
+}
+
+.crunchatize-debug-label {
+  flex: 1 1 auto;
+  font-size: 0.8rem;
+  color: $ink;
+  overflow-wrap: anywhere;
+}
+
+.crunchatize-debug-toggle {
+  flex: 0 0 auto;
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.7rem;
+  line-height: 1;
+  padding: 0.15rem 0.3rem;
+  color: $ink-dim;
+  background-color: transparent;
+  border: 1px solid $line;
+  border-radius: 0.25rem;
+
+  &:hover {
+    color: $ink;
+    border-color: $ink-dim;
+  }
+}
+
+.crunchatize-debug-detail {
+  margin: 0.35rem 0 0;
+  padding: 0.4rem 0.5rem;
+  max-height: 22rem;
+  overflow: auto;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.7rem;
+  line-height: 1.45;
+  // Long unbroken strings - a URL, a key-shaped token, a JSON blob - must
+  // wrap rather than force the whole drawer sideways.
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  color: $ink-dim;
+  background-color: $surface-sunken;
+  border: 1px solid $line;
+  border-radius: 0.3rem;
+}
+
 .crunchatize-portrait-viewer {
   position: fixed;
   inset: 0;
