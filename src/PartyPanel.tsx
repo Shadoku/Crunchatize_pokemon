@@ -6,7 +6,7 @@ import {PartyMember, PartyMemberDetails, DEFAULT_DETAILS, detailsOf, displayName
 import {itemCategories} from "./Inventory";
 import {NpcEntry, describeAffinity, AFFINITY_MIN, AFFINITY_MAX} from "./Npc";
 import {SuggestionKind} from "./Scan";
-import {Outcome, ResultClass} from "./Outcome";
+import {Outcome, rollBand, describeRoll} from "./Outcome";
 
 function clampLevel(value: string): number {
     return Math.min(Math.max(Math.floor(Number(value)) || 1, 1), 100);
@@ -799,17 +799,25 @@ function RollToggle({stage, anonymizedId, refresh}: {
     );
 }
 
-// The result of the player's last dice check. This is the only place the
-// numeric roll is ever shown - it never appears in chat or chat history,
-// since the narrator is only ever told the qualitative outcome.
+// The chance the player's last action came off, as the narrator was told it.
+// This is the only place the number is ever shown - it never appears in chat
+// or chat history.
+//
+// It deliberately doesn't claim an outcome: the narrator decides what actually
+// happened, so the panel would only be guessing. The one exception is a
+// critical, which the stage itself acts on by nudging the acting moemon's
+// condition, and so can honestly report.
 function LastRoll({outcome}: {outcome: Outcome | null}): ReactElement | null {
     if (!outcome) return null;
+    const critical = describeRoll(outcome.roll);
 
     return (
-        <div className={`crunchatize-lastroll crunchatize-lastroll-${ResultClass[outcome.result]}`}>
+        <div className={`crunchatize-lastroll crunchatize-lastroll-${rollBand(outcome.roll)}`}>
             <span className="crunchatize-lastroll-label">Last Roll</span>
-            <span className="crunchatize-lastroll-roll">d20: {outcome.roll}</span>
-            <span className="crunchatize-lastroll-result">{outcome.getLabel()}</span>
+            <span className="crunchatize-lastroll-roll">{outcome.roll}% chance</span>
+            <span className="crunchatize-lastroll-result">
+                {critical ? `${outcome.getLabel()} · ${critical}` : outcome.getLabel()}
+            </span>
         </div>
     );
 }

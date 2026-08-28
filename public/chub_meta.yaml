@@ -24,27 +24,27 @@ this stage asks you to forfeit some agency over the details of your actions;
 the bot will be specifically instructed to take your check result and paraphrase your choices as it narrates, rather than accept your input as canon.
 As a result, you may find that you are better off simply describing the nature or attitude of the action you intend to take and allowing the bot to fill in the details.
 <br><br>
-Every action rolls a d20 behind the scenes. Rather than adding up modifiers to a fixed threshold, the roll, your action, your party, and the
-bot's last reply are handed to the same model powering your chat, which judges the outcome directly as one of: no check needed, failure,
-success, critical success, or critical failure. There's no more XP grind or leveling; your 'build' is just whichever moemon you've got with you.
-The roll itself never appears in the chat - only the panel shows it, so the narration reads cleanly while you can still see what you rolled.
+Every action rolls a percentage behind the scenes - the chance the attempt comes off - and hands it to the narrator, which reads it as a
+gradient: a high number goes well, a low one goes badly, and a middling one lands somewhere in between. Nothing is asked to pick a verdict
+from a list, so nothing gets stuck on one. There's no XP grind or leveling; your 'build' is just whichever moemon you've got with you. The
+number never appears in the chat - only the panel shows it, so the narration reads cleanly while you can still see what you rolled. The
+difficulty setting shifts the number directly: positive is kinder, negative is harsher.
 <br><br>
 **Party tracking**<br>
-The stage keeps a little panel (visible alongside the chat) showing each player's current party. It fills in automatically as moemon are
-mentioned in the story - a companion character card, something you say you're sending out, something the narrator introduces - and you can
-also add or remove entries by hand at any time from the panel itself, in case the auto-detection guesses wrong. The panel also shows the
-result of your last roll.
+The stage keeps a little panel (visible alongside the chat) showing each player's current party. Nothing joins it on its own: moemon arrive
+either because you added them by hand, or because the story scan noticed one joining you and you accepted the suggestion. That is deliberate
+- matching every species named in the prose meant every wild moemon, every opponent and every moemon somebody merely mentioned ended up on
+your roster. The panel also shows your last roll.
 <br><br>
 **Keeping the story straight**<br>
 Long chats drift. The panel also tracks the things a narrator otherwise forgets once they scroll out of context: open plot threads, the
-characters you keep running into (and how they feel about you, which shifts as checks involving them land well or badly), and where and when
-the current scene is happening. These are folded into the same periodic reminder as your party and bag, so they cost tokens on an interval
-rather than every turn.
+characters you keep running into (and how they feel about you, set from the panel), and where and when the current scene is happening. These
+are folded into the same periodic reminder as your party and bag, so they cost tokens on an interval rather than every turn.
 <br><br>
-Your moemon also carry a condition now. A critical failure knocks the acting moemon down a peg - fine, then hurt, then fainted - and a
-critical success pulls her back up one. It feeds into how later checks are judged rather than blocking anything outright, and you can always
-set it by hand from the panel if the narration says otherwise. Whatever a moemon is holding is now told to the judge too, so a held item can
-actually matter to a roll instead of being decoration.
+Your moemon also carry a condition. A roll in the bottom five knocks the acting moemon down a peg - fine, then hurt, then fainted - and one
+in the top five pulls her back up. It colours how the narrator plays her rather than blocking anything outright, and you can always set it by
+hand from the panel if the story says otherwise. Whatever a moemon is holding goes to the narrator too, so a held item can actually matter
+instead of being decoration.
 <br><br>
 **It keeps up on its own**<br>
 Every ten messages (configurable, or off), the stage quietly reads back over what's happened and looks for things worth tracking that you
@@ -60,6 +60,11 @@ to pick up where you left off.
 I've tagged the stage NSFW, but there isn't anything in the stage that would render a wholesome chat inappropriate. However, my example bot is NSFW, and I'm sure other bots that attach this stage could be, too.
 <br><br>
 **Updates:**<br>
+08/27/2026 - Two fixes to the stage guessing badly. Moemon no longer join your party just for being named in the story - wild ones,
+opponents and moemon somebody merely mentioned were all being recruited - so the roster now fills only from a scan suggestion you accept or
+from your own hand; anything already wrongly added is still there to remove. And checks no longer ask the model to pick one of five verdicts,
+which it answered 'no check' to almost every time: an action now rolls a straight percentage chance of success and the narrator reads it as a
+gradient. The difficulty setting shifts that number directly, and the roll/no-roll toggle works as before.<br>
 08/27/2026 - Fixed Scan now doing nothing. The scan was reading a copy of the story the stage kept for itself, which was empty on any chat
 opened fresh - so the button quietly did nothing at all. It now asks the platform for the chat history instead, works on the first click,
 and tells you what it did rather than leaving you guessing between 'found nothing' and 'broken'.<br>

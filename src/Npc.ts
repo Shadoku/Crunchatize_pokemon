@@ -1,5 +1,3 @@
-import {escapeRegex} from "./Lore";
-
 // A recurring character the story keeps coming back to, and how the player
 // stands with them. Name and note are what the narrator is reminded of;
 // affinity is nudged by how checks involving them land.
@@ -51,16 +49,4 @@ export function parseNpcs(raw: any): NpcEntry[] {
             note: typeof npc.note === 'string' ? npc.note.trim() : '',
             affinity: clampAffinity(Number(npc.affinity))
         }));
-}
-
-// Which tracked NPCs are named in a block of text. Built per call from the
-// chat's own (small) list rather than precompiled like the species matchers
-// in Lore.ts, since this vocabulary changes as the player edits it.
-export function findNpcMentions(text: string, npcs: NpcEntry[]): NpcEntry[] {
-    if (!text) return [];
-    return npcs.filter(npc => {
-        const name = npc.name.trim();
-        if (name.length === 0) return false;
-        return new RegExp(`\\b${escapeRegex(name)}(?![A-Za-z0-9])`, 'i').test(text);
-    });
 }

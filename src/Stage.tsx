@@ -2,7 +2,10 @@ import {ReactElement} from "react";
 import {StageBase, StageResponse, InitialData, Message, Character, User} from "@chub-ai/stages-ts";
 import {LoadResponse} from "@chub-ai/stages-ts/dist/types/load";
 import {Action} from "./Action";
-import {Outcome, Result, ResultDescription} from "./Outcome";
+import {
+    Outcome, ROLL_MIN, ROLL_MAX, NO_ROLL_DIRECTION,
+    rollDirection, isCriticalSuccess, isCriticalFailure
+} from "./Outcome";
 import {getSpecies, findSpeciesMentions, escapeRegex} from "./Lore";
 import {
     PartyMember, PartyMemberDetails, DEFAULT_DETAILS, detailsOf, displayNameOf, labelFor, typesOf,
@@ -11,7 +14,7 @@ import {
 import {defaultDetailsFor} from "./Moveset";
 import {InventoryItem, parseInventory, sameItem} from "./Inventory";
 import {QuestEntry, parseQuests, newQuestId} from "./Quest";
-import {NpcEntry, parseNpcs, clampAffinity, sameNpc, describeAffinity, findNpcMentions} from "./Npc";
+import {NpcEntry, parseNpcs, clampAffinity, sameNpc, describeAffinity} from "./Npc";
 import {
     Suggestion, Dismissal, RawDetection, SuggestionKind,
     parseScanOutput, parseSuggestions, parseDismissals,
@@ -63,20 +66,16 @@ interface UserState {
 // tokens restating what rarely changes.
 const DEFAULT_ROSTER_INTERVAL = 6;
 
-// The classifier is awaited inside beforePrompt, which Chub is waiting on, so
-// it needs a ceiling well inside Chub's own patience for a stage.
-const CLASSIFIER_TIMEOUT_MS = 12000;
+// Percentage points one step of the configured difficulty modifier is worth.
+const DIFFICULTY_POINTS_PER_STEP = 5;
 
-// How far a check involving an NPC moves where the player stands with them.
-// Criticals move twice as far, matching how they're the only results that
-// move a party member's condition.
-const AFFINITY_SHIFT: {[result in Result]: number} = {
-    [Result.CriticalSuccess]: 2,
-    [Result.Success]: 1,
-    [Result.Failure]: -1,
-    [Result.CriticalFailure]: -2,
-    [Result.None]: 0
-};
+// What resolveAction worked out: the roll, and who the stage decided was
+// taking the action. The member travels with it so the directions can say
+// what she's carrying without hunting for her again by name.
+interface ResolvedAction {
+    outcome: Outcome;
+    actingMember: PartyMember|undefined;
+}
 
 // Beyond this many tracked NPCs, only the most recently added are put in
 // front of the LLM - the roster note is reference material, not a directory.
@@ -199,7 +198,6 @@ export class Stage extends StageBase<InitStateType, ChatStateType, MessageStateT
             this.userState[user.anonymizedId] = this.initializeUserState();
         }
         this.setStateFromMessageState(messageState);
-        this.seedPartyFromCharacters();
     }
 
     initializeUserState(): UserState {
@@ -227,23 +225,15 @@ export class Stage extends StageBase<InitStateType, ChatStateType, MessageStateT
         return this.userState[anonymizedId];
     }
 
-    // Any moemon character card already in the chat counts as a party member.
-    seedPartyFromCharacters() {
-        for (const character of Object.values(this.characters)) {
-            if (character.isRemoved) continue;
-            const species = getSpecies(character.name);
-            if (!species) continue;
-            for (const user of Object.values(this.users)) {
-                this.addAutoPartyMember(user.anonymizedId, species.name);
-            }
-        }
-    }
-
     getManualParty(anonymizedId: string): PartyMember[] {
         return this.chatState[anonymizedId]?.manualParty ?? [];
     }
 
-    // The manual roster plus whatever's been auto-detected, deduped by species.
+    // The manual roster plus anything left over from auto-detection, deduped
+    // by species. Nothing writes autoParty any more - moemon join by way of a
+    // scanner suggestion the player accepts, or by hand - but it is still read
+    // back so entries detected before that change stay visible and removable
+    // instead of vanishing from someone's party mid-chat.
     getFullParty(anonymizedId: string): PartyMember[] {
         const manual = this.getManualParty(anonymizedId);
         const seen = new Set(manual.map(member => member.species.toLowerCase()));
@@ -255,20 +245,6 @@ export class Stage extends StageBase<InitStateType, ChatStateType, MessageStateT
             }
         }
         return combined;
-    }
-
-    addAutoPartyMember(anonymizedId: string, species: string) {
-        const alreadyKnown = this.getFullParty(anonymizedId).some(member => member.species.toLowerCase() === species.toLowerCase());
-        if (!alreadyKnown) {
-            const userState = this.getUserState(anonymizedId);
-            userState.autoParty = [...userState.autoParty, {species, source: 'auto', details: defaultDetailsFor(species)} as PartyMember];
-        }
-    }
-
-    addAutoPartyMembersFromText(anonymizedId: string, text: string) {
-        for (const species of findSpeciesMentions(text)) {
-            this.addAutoPartyMember(anonymizedId, species);
-        }
     }
 
     // Writes one slice of a player's chat state without disturbing the rest -
@@ -407,29 +383,11 @@ export class Stage extends StageBase<InitStateType, ChatStateType, MessageStateT
         await this.patchChatState(anonymizedId, {npcs});
     }
 
-    // Shifts the standing of every tracked NPC named in the action or in the
-    // narration it answers. Auto-detection in the same spirit as the party
-    // list: a guess the player can always correct from the panel. Only
-    // existing entries move - a name appearing in prose isn't evidence it's
-    // an NPC worth tracking, so nothing is created here.
-    applyOutcomeAffinity(anonymizedId: string, outcome: Outcome): void {
-        const shift = AFFINITY_SHIFT[outcome.result] ?? 0;
-        if (shift === 0) return;
-
-        const npcs = this.getNpcs(anonymizedId);
-        if (npcs.length === 0) return;
-
-        const context = `${outcome.action.description ?? ''}\n${this.getUserState(anonymizedId).lastNarratorResponse}`;
-        const mentioned = findNpcMentions(context, npcs);
-        if (mentioned.length === 0) return;
-
-        const touched = new Set(mentioned.map(npc => npc.name.toLowerCase()));
-        this.stageChatState(anonymizedId, {
-            npcs: npcs.map(npc => touched.has(npc.name.toLowerCase())
-                ? {...npc, affinity: clampAffinity(npc.affinity + shift)}
-                : npc)
-        });
-    }
+    // Affinity moves only from the panel now. It used to shift on every check
+    // that named a tracked character, keyed off the outcome the model was
+    // asked to pick - and that verdict was unreliable enough that the standing
+    // it drove was too. A number the player nudges deliberately beats one that
+    // drifts on a guess.
 
     // Everything chat-wide worth carrying between chats: the roster the
     // player built, their bag, their open threads, who they know, and where
@@ -539,6 +497,10 @@ export class Stage extends StageBase<InitStateType, ChatStateType, MessageStateT
         // a lifecycle hook, so it was empty in exactly the case that matters
         // most - a chat opened fresh, before the player has said anything.
         const tracked = this.buildContextNote(anonymizedId);
+        // Spelled out rather than left as {{user}}: this prompt goes straight
+        // to the model without passing through replaceTags, so a tag here
+        // would reach it unsubstituted.
+        const player = this.users[anonymizedId]?.name || 'the player';
 
         return [
             `You are reviewing the roleplay above to spot what has changed.`,
@@ -548,7 +510,11 @@ export class Stage extends StageBase<InitStateType, ChatStateType, MessageStateT
             ``,
             `Report only what is NEW or CHANGED versus what is already tracked.`,
             `Write one finding per line, in exactly these forms:`,
-            `PARTY | <species>`,
+            // Spelled out because this is now the only route a moemon takes
+            // into the roster. Matching every species named in the prose is
+            // what used to recruit every wild moemon and every opponent the
+            // story mentioned.
+            `PARTY | <species> - ONLY a moemon that has actually joined ${player}'s party. Never one that merely appears, is fought, is owned by someone else, or is only spoken about.`,
             `QUEST | <short description of a new goal or open thread>`,
             `RESOLVED | <the tracked thread that is now finished>`,
             `NPC | <name> | <who they are, briefly>`,
@@ -779,16 +745,17 @@ export class Stage extends StageBase<InitStateType, ChatStateType, MessageStateT
         userState.partyStatus = {...userState.partyStatus, [species.toLowerCase()]: condition};
     }
 
-    // A critical result nudges the acting member's condition one notch;
-    // everything else (including plain Failure/Success) leaves it alone -
-    // this is flavor for the dramatic swings, not a full HP economy.
-    applyOutcomeCondition(anonymizedId: string, member: PartyMember|undefined, result: Result): void {
+    // An extreme roll nudges the acting member's condition one notch; an
+    // ordinary one leaves it alone. Flavor for the dramatic swings, not a
+    // full HP economy - and now read straight off the number, so it can't be
+    // lost to a verdict that failed to parse.
+    applyOutcomeCondition(anonymizedId: string, member: PartyMember|undefined, roll: number): void {
         if (!member) return;
 
         const current = this.getCondition(anonymizedId, member.species);
-        if (result === Result.CriticalFailure) {
+        if (isCriticalFailure(roll)) {
             this.setCondition(anonymizedId, member.species, stepConditionDown(current));
-        } else if (result === Result.CriticalSuccess) {
+        } else if (isCriticalSuccess(roll)) {
             this.setCondition(anonymizedId, member.species, stepConditionUp(current));
         }
     }
@@ -817,41 +784,39 @@ export class Stage extends StageBase<InitStateType, ChatStateType, MessageStateT
         };
     }
 
-    // Resolves a line of action: rolls a d20 and asks the platform's own LLM
-    // to judge the outcome from the roll plus scene context. Shared by the
-    // normal chat path and by panel-initiated actions like using an item,
-    // which never pass through beforePrompt and so must be resolved here.
-    async resolveAction(anonymizedId: string, text: string, charName: string = ''): Promise<Outcome> {
+    // Resolves a line of action by rolling the chance it comes off. No model
+    // call: the number goes straight to the narrator, which is the whole
+    // point - the old two-step (roll a d20, then ask the model to name one of
+    // five verdicts) answered "no check" for every reply it couldn't parse,
+    // and this hook is one Chub blocks on, so it was paying a round-trip for
+    // the privilege.
+    resolveAction(anonymizedId: string, text: string, charName: string = ''): ResolvedAction {
         const sequence = this.replaceTags(text, {
             "user": this.users[anonymizedId]?.name ?? '',
             "char": charName
         });
 
-        const roll = 1 + Math.floor(Math.random() * 20);
+        const roll = this.rollChance();
         const party = this.getFullParty(anonymizedId);
         const actingMember = this.findActingMember(party, sequence);
         const actor = actingMember ? displayNameOf(actingMember) : null;
 
-        const result = await this.classifyOutcome(this.buildClassificationPrompt(anonymizedId, sequence, roll, actingMember));
-        const outcome = new Outcome(roll, result, new Action(text, actor));
-        this.applyOutcomeCondition(anonymizedId, actingMember, result);
-        this.applyOutcomeAffinity(anonymizedId, outcome);
-        return outcome;
+        const outcome = new Outcome(roll, new Action(text, actor));
+        this.applyOutcomeCondition(anonymizedId, actingMember, roll);
+        return {outcome, actingMember};
     }
 
-    // Turns a configured difficulty modifier into a plain-language lean for
-    // the classification prompt, since there's no longer a numeric total to
-    // add it to.
-    difficultyHint(): string {
-        const magnitude = Math.abs(this.globalModifier);
-        if (magnitude === 0) return '';
-        const intensity = magnitude >= 3 ? 'much' : magnitude >= 2 ? 'somewhat' : 'slightly';
-        return this.globalModifier > 0
-            ? `Judge ${intensity} more generously than usual.`
-            : `Judge ${intensity} more strictly than usual.`;
+    // The chance an attempt succeeds, shifted by the configured difficulty.
+    // The modifier used to be phrased at the judge in words ("judge somewhat
+    // more generously"); with the judge gone it moves the number instead,
+    // which is both plainer and impossible to misread.
+    rollChance(): number {
+        const roll = Math.round(Math.random() * (ROLL_MAX - ROLL_MIN)) + ROLL_MIN
+            + this.globalModifier * DIFFICULTY_POINTS_PER_STEP;
+        return Math.min(Math.max(roll, ROLL_MIN), ROLL_MAX);
     }
 
-    // What the judge should know about whoever is taking the action: what
+    // What the narrator should know about whoever is taking the action: what
     // they're carrying, and whether they're in any shape to act. Both are
     // handed over as plain description rather than as rules - the model
     // decides whether a Focus Sash or a limp matters to *this* action, the
@@ -870,41 +835,6 @@ export class Stage extends StageBase<InitStateType, ChatStateType, MessageStateT
         return facts.length > 0 ? `${name} ${facts.join(' and ')}.` : '';
     }
 
-    buildClassificationPrompt(anonymizedId: string, sequence: string, roll: number, actingMember?: PartyMember): string {
-        const lastNarratorResponse = this.getUserState(anonymizedId).lastNarratorResponse;
-        const roster = this.buildRosterNote(anonymizedId);
-        const hint = this.difficultyHint();
-        const setting = this.getEnvironment();
-        const actor = this.actorNote(anonymizedId, actingMember);
-
-        return [
-            `Resolve this dice check for a Pokémon-style tabletop roleplay.`,
-            lastNarratorResponse ? `Previous narration: ${lastNarratorResponse}` : null,
-            setting ? `Setting: ${setting}` : null,
-            roster ? `Party: ${roster}` : null,
-            `Action: ${sequence}`,
-            actor ? `Actor: ${actor}` : null,
-            `d20 roll: ${roll} (1-20)`,
-            hint ? `Note: ${hint}` : null,
-            `Respond with exactly one word: NoCheck, Failure, Success, CriticalSuccess, or CriticalFailure.`
-        ].filter((line): line is string => !!line).join('\n');
-    }
-
-    async classifyOutcome(prompt: string): Promise<Result> {
-        try {
-            const response = await this.withTimeout(
-                this.generator.textGen({prompt, max_tokens: 8, include_history: false, stop: ['\n']}),
-                CLASSIFIER_TIMEOUT_MS
-            );
-            const result = this.parseClassificationResult(response?.result);
-            console.log(`Classification result: ${response?.result} -> ${result}`);
-            return result ?? Result.None;
-        } catch (error) {
-            console.log(error);
-            return Result.None;
-        }
-    }
-
     withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
         return new Promise((resolve, reject) => {
             const timer = setTimeout(() => reject(new Error(`Generation timed out after ${timeoutMs}ms`)), timeoutMs);
@@ -915,27 +845,10 @@ export class Stage extends StageBase<InitStateType, ChatStateType, MessageStateT
         });
     }
 
-    // Reduces the LLM's free-text reply to one of the strict outcome labels.
-    // Anything that doesn't clearly match falls through to null, which the
-    // caller treats as a safe no-op rather than forcing a failure.
-    parseClassificationResult(raw: string|undefined|null): Result|null {
-        if (!raw) return null;
-        const normalized = raw.trim().toLowerCase().replace(/[^a-z]/g, '');
-        if (!normalized) return null;
-
-        const critical = normalized.includes('crit');
-        if (critical && normalized.includes('fail')) return Result.CriticalFailure;
-        if (critical && (normalized.includes('success') || normalized.includes('pass'))) return Result.CriticalSuccess;
-        if (normalized.includes('fail')) return Result.Failure;
-        if (normalized.includes('success') || normalized.includes('pass')) return Result.Success;
-        if (normalized.includes('nocheck') || normalized.includes('none')) return Result.None;
-        return null;
-    }
-
     // Told to the narrator when the dice are off, so it treats the message as
     // something that simply happens rather than something to be resolved.
     buildNoRollDirections(anonymizedId: string, charName: string = ''): string {
-        const instruction = this.replaceTags(ResultDescription[Result.None], {
+        const instruction = this.replaceTags(NO_ROLL_DIRECTION, {
             "user": this.users[anonymizedId]?.name ?? '',
             "char": charName
         });
@@ -1014,7 +927,6 @@ export class Stage extends StageBase<InitStateType, ChatStateType, MessageStateT
         // Dice turned off from the panel: the message goes through untouched,
         // with no classification and so no waiting on the classifier either.
         if (!this.isRollEnabled(anonymizedId)) {
-            if (finalContent) this.addAutoPartyMembersFromText(anonymizedId, finalContent);
             this.setLastOutcome(anonymizedId, null);
 
             return {
@@ -1029,10 +941,9 @@ export class Stage extends StageBase<InitStateType, ChatStateType, MessageStateT
         }
 
         if (finalContent) {
-            this.addAutoPartyMembersFromText(anonymizedId, finalContent);
-            const outcome = await this.resolveAction(anonymizedId, content,
+            const {outcome, actingMember} = this.resolveAction(anonymizedId, content,
                 promptForId ? this.characters[promptForId]?.name ?? '' : '');
-            this.setLastOutcome(anonymizedId, outcome);
+            this.setLastOutcome(anonymizedId, outcome, actingMember);
         }
 
         return {
@@ -1053,7 +964,6 @@ export class Stage extends StageBase<InitStateType, ChatStateType, MessageStateT
 
         const due: string[] = [];
         for (const user of Object.values(this.users)) {
-            this.addAutoPartyMembersFromText(user.anonymizedId, message);
             const userState = this.getUserState(user.anonymizedId);
             userState.lastOutcomePrompt = '';
             // Kept as context for the next action's classification prompt.
@@ -1243,7 +1153,11 @@ export class Stage extends StageBase<InitStateType, ChatStateType, MessageStateT
     }
 
     convertOutcome(input: any): Outcome {
-        return new Outcome(input['roll'] ?? 0, input['result'] ?? Result.None, this.convertAction(input['action']));
+        // Rolls persisted before the switch to percentages carried a d20 value
+        // and a verdict string; the verdict is simply ignored, which leaves
+        // the old number rendering as a small percentage in the panel. That is
+        // cosmetic, on already-sent messages only, and not worth a migration.
+        return new Outcome(input['roll'] ?? 0, this.convertAction(input['action']));
     }
 
     convertAction(input: any): Action {
@@ -1267,17 +1181,23 @@ export class Stage extends StageBase<InitStateType, ChatStateType, MessageStateT
         return messageState;
     }
 
-    setLastOutcome(anonymizedId: string, outcome: Outcome|null) {
+    setLastOutcome(anonymizedId: string, outcome: Outcome|null, actingMember?: PartyMember) {
         const userState = this.getUserState(anonymizedId);
         userState.lastOutcome = outcome;
         userState.lastOutcomePrompt = '';
-        if (userState.lastOutcome) {
-            userState.lastOutcomePrompt += `{{user}} has chosen the following action: ${userState.lastOutcome.action.description ?? ''}\n`;
-            userState.lastOutcomePrompt += `${ResultDescription[userState.lastOutcome.result ?? Result.None]}\n`
-            if (Object.values(this.users).length > 1) {
-                userState.lastOutcomePrompt += `Use third-person language for {{user}}.\n`;
-            }
+        if (!outcome) return;
+
+        const lines = [`{{user}} has chosen the following action: ${outcome.action.description ?? ''}`];
+        // What she's carrying and what shape she's in used to go to the judge;
+        // with the judge gone it belongs to the narrator, or a held item stops
+        // reaching the model at all.
+        const actor = this.actorNote(anonymizedId, actingMember);
+        if (actor) lines.push(actor);
+        lines.push(rollDirection(outcome.roll));
+        if (Object.values(this.users).length > 1) {
+            lines.push(`Use third-person language for {{user}}.`);
         }
+        userState.lastOutcomePrompt = `${lines.join('\n')}\n`;
     }
 
     replaceTags(source: string, replacements: {[name: string]: string}) {
