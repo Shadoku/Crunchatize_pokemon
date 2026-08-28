@@ -14,8 +14,8 @@
 
 import {readFile, writeFile, mkdir} from 'fs/promises';
 
-const CARD = 'character/moemon-adventure-rpg.json';
-const LOREBOOK = 'lorebook/moemon-lore.json';
+const CARD = 'distributables/moemon-adventure-rpg.json';
+const LOREBOOK = 'distributables/moemon-lore.json';
 const OUT_DIR = 'dist-cards';
 const OUT = `${OUT_DIR}/moemon-adventure-rpg-with-lorebook.json`;
 

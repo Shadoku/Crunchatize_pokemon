@@ -7,8 +7,8 @@ built to stay out of each other's way.
 | Piece | File | What it owns |
 |---|---|---|
 | **Stage** | this repo (`src/`, deployed to chub) | The party, the bag, open threads, recurring characters, the current scene, the dice, and the Prose/Story/RPG switch. |
-| **Lorebook** | `lorebook/moemon-lore.json` | The Takane region — its towns, Gyms, Leaders, culture and rumours — plus Kanto and Johto next door, and every Moémon species. |
-| **Character card** | `character/moemon-adventure-rpg.json` | The narrator: prose, pacing, battles, and the stat block's numbers. |
+| **Lorebook** | `distributables/moemon-lore.json` | The Takane region — its towns, Gyms, Leaders, culture and rumours — plus Kanto and Johto next door, and every Moémon species. |
+| **Character card** | `distributables/moemon-adventure-rpg.json` | The narrator: prose, pacing, battles, and the stat block's numbers. |
 
 Import the lorebook and the card into chub, attach the stage to the chat, and
 they hand off to each other. Missing one? The other two still work — the card
@@ -53,7 +53,7 @@ yarn build     # sync-lore, typecheck, bundle, re-encode portraits
 **The lorebook is the single source of truth for species.**
 `src/assets/moemonSpecies.json` is generated from it by
 `scripts/sync-lore.mjs` (which `yarn dev` and `yarn build` both run first).
-Edit `lorebook/moemon-lore.json`, not the generated file. An entry counts as a
+Edit `distributables/moemon-lore.json`, not the generated file. An entry counts as a
 Moémon if its text carries a species type tag — "a Water/Fairy-type girl" —
 which is the same string the stage reads types from. Locations, items and
 people have no such tag and are never offered as party members.
