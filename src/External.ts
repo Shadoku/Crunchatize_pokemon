@@ -97,13 +97,17 @@ export function buildScanSchema(): Record<string, unknown> {
 // complete. A half-filled config is not an error worth shouting about - the
 // player is mid-setup - it simply means the built-in scan handles this one.
 export function readExternalConfig(config: any): ExternalScanConfig|null {
-    if (!config?.externalScanEnabled) return null;
+    // A string enum ('off'/'on') rather than type: boolean - Chub's config UI
+    // does not reliably render a bare top-level boolean as a toggle, while a
+    // string enum is the same shape playMode already uses successfully in
+    // this schema.
+    if (config?.externalScanEnabled !== 'on') return null;
 
     const apiKey = typeof config.externalScanApiKey === 'string' ? config.externalScanApiKey.trim() : '';
     const model = typeof config.externalScanModel === 'string' ? config.externalScanModel.trim() : '';
     if (!apiKey || !model) return null;
 
-    const rawBase = typeof config.externalScanBaseUrl === 'string' ? config.externalScanBaseUrl.trim() : '';
+    const rawBase = typeof config.externalScanEndpoint === 'string' ? config.externalScanEndpoint.trim() : '';
     // A trailing slash here and the joined path becomes "//chat/completions",
     // which some gateways route to a 404 rather than normalising.
     const baseUrl = (rawBase || DEFAULT_BASE_URL).replace(/\/+$/, '');

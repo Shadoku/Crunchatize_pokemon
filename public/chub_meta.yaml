@@ -194,15 +194,16 @@ config_schema:
     externalScanEnabled:
       title: Scan With An External Model
       description: >-
-        Off by default. When on, the story scan is answered by a model you
-        supply through OpenRouter (or any OpenAI-compatible endpoint) instead
-        of by the model running your chat. The external model is held to a JSON
-        schema, so its findings arrive in a fixed shape rather than as text to
-        be parsed - which is what the built-in scan has to do. It costs you a
-        request per scan. If it fails for any reason, the chat's own model
-        takes the scan and the panel says so.
-      type: boolean
-      default: false
+        Off by default. Set to "on" to have the story scan answered by a model
+        you supply through OpenRouter (or any OpenAI-compatible endpoint)
+        instead of by the model running your chat. The external model is held
+        to a JSON schema, so its findings arrive in a fixed shape rather than
+        as text to be parsed - which is what the built-in scan has to do. It
+        costs you a request per scan. If it fails for any reason, the chat's
+        own model takes the scan and the panel says so.
+      type: string
+      enum: ['off', 'on']
+      default: 'off'
     externalScanApiKey:
       title: External Scan API Key
       description: >-
@@ -222,7 +223,7 @@ config_schema:
         will fail every scan and fall back to the chat's model.
       type: string
       default: 'openai/gpt-4o-mini'
-    externalScanBaseUrl:
+    externalScanEndpoint:
       title: External Scan Endpoint
       description: >-
         Where to send the scan. Leave as-is for OpenRouter. Any OpenAI-shaped
