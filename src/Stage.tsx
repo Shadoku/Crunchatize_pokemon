@@ -21,6 +21,8 @@ import {
     parseScanOutput, parseSuggestions, parseDismissals,
     suggestionKey, describeSuggestion, newSuggestionId
 } from "./Scan";
+import {ExternalScanConfig, readExternalConfig, scanExternally} from "./External";
+import {StoryEntry, parseStoryLog, appendStoryEntry, renderTranscript} from "./StoryLog";
 import {PartyPanel} from "./PartyPanel";
 
 type MessageStateType = any;
@@ -133,10 +135,21 @@ const SCAN_MAX_TOKENS = 256;
 const DISMISSAL_LIFETIME_SCANS = 5;
 
 // What a scan did, so the panel can tell "found nothing" from "never ran".
+// Which model answered travels with it as well: a player who has paid for an
+// external scan is owed the difference between it having run and it having
+// quietly handed the work back to the chat's own model.
 export interface ScanOutcome {
     ok: boolean;
     found: number;
     reason?: 'busy' | 'failed';
+    source?: 'external' | 'builtin';
+    // Set when the external scan was configured but did not answer, so the
+    // built-in scan stood in for it.
+    fellBack?: boolean;
+    // Set when the external scan was configured but there was no recorded
+    // story to send it yet - the log starts empty on a chat that was already
+    // under way when the setting was switched on.
+    noStoryYet?: boolean;
 }
 
 // Chat-wide (not tied to a branch) record of what the player has set up by
@@ -223,6 +236,16 @@ export class Stage extends StageBase<InitStateType, ChatStateType, MessageStateT
     // that in a multiplayer chat only the first player due a scan got one and
     // everyone else was silently told the stage was busy.
     scanning: Set<string> = new Set();
+    // The external scanner, when the player has both switched it on and
+    // filled it in; null otherwise, which is the whole of the "is it on?"
+    // check - see readExternalConfig.
+    externalScan: ExternalScanConfig|null;
+    // The recent story, kept only because an external scan has no other way
+    // to see it (see StoryLog.ts) - the built-in scan asks the platform for
+    // the history instead. One log rather than one per player: everyone in a
+    // chat is reading the same story, and a copy per player would pay for it
+    // again in message state each time.
+    storyLog: StoryEntry[] = [];
 
 
 
@@ -244,6 +267,7 @@ export class Stage extends StageBase<InitStateType, ChatStateType, MessageStateT
         this.rosterInterval = Math.max(config?.rosterReminderInterval ?? DEFAULT_ROSTER_INTERVAL, 0);
         this.scanInterval = Math.max(config?.scanInterval ?? DEFAULT_SCAN_INTERVAL, 0);
         this.defaultMode = parseMode(config?.playMode);
+        this.externalScan = readExternalConfig(config);
         this.chatState = chatState ?? {};
 
         for (const user of Object.values(this.users)) {
@@ -586,42 +610,101 @@ export class Stage extends StageBase<InitStateType, ChatStateType, MessageStateT
         return Number.isFinite(count) ? count : 0;
     }
 
-    buildScanPrompt(anonymizedId: string): string {
-        // buildContextNote already says exactly what's tracked - roster,
-        // scene, open threads, characters - so the scan tells the model what
-        // it already knows in the same words the narrator gets. The story
-        // itself comes from include_history rather than from anything the
-        // stage keeps: a buffer of its own could only be written from inside
-        // a lifecycle hook, so it was empty in exactly the case that matters
-        // most - a chat opened fresh, before the player has said anything.
-        const tracked = this.buildContextNote(anonymizedId);
-        // Spelled out rather than left as {{user}}: this prompt goes straight
-        // to the model without passing through replaceTags, so a tag here
-        // would reach it unsubstituted.
-        const player = this.users[anonymizedId]?.name || 'the player';
+    // Appends a turn to the shared story log. In-memory only: the log rides
+    // out in message state, which none of these callers may write directly -
+    // the hooks return it instead, and both hooks that record a turn build
+    // that state after calling this.
+    recordStoryEntry(who: string, text: string): void {
+        // Nothing is recorded unless a scan could actually want it. The log
+        // costs message state on every message, and a player who has not
+        // turned the external scan on gets no use from it at all.
+        if (!this.externalScan) return;
+        this.storyLog = appendStoryEntry(this.storyLog, who, text);
+    }
 
+    // The vocabulary both scans share: one entry per finding the panel knows
+    // how to act on. Held in one place so the two transports cannot drift
+    // apart on what a finding *means* while differing, as they must, on how
+    // it is written down.
+    scanVocabulary(player: string): {verb: string; kind: SuggestionKind; value: string; detail: string; note: string}[] {
         return [
-            `You are reviewing the roleplay above to spot what has changed.`,
-            ``,
-            `Already tracked:`,
-            tracked || '(nothing yet)',
-            ``,
-            `Report only what is NEW or CHANGED versus what is already tracked.`,
-            `Write one finding per line, in exactly these forms:`,
             // Spelled out because this is now the only route a moemon takes
             // into the roster. Matching every species named in the prose is
             // what used to recruit every wild moemon and every opponent the
             // story mentioned.
-            `PARTY | <species> - ONLY a moemon that has actually joined ${player}'s party. Never one that merely appears, is fought, is owned by someone else, or is only spoken about.`,
-            `QUEST | <short description of a new goal or open thread>`,
-            `RESOLVED | <the tracked thread that is now finished>`,
-            `NPC | <name> | <who they are, briefly>`,
-            `SCENE | <where and when the scene now is>`,
-            `CONDITION | <species> | <ok, hurt, or fainted>`,
+            {verb: 'PARTY', kind: 'party', value: 'species', detail: '', note: `ONLY a moemon that has actually joined ${player}'s party. Never one that merely appears, is fought, is owned by someone else, or is only spoken about.`},
+            {verb: 'QUEST', kind: 'quest', value: 'short description of a new goal or open thread', detail: '', note: ''},
+            {verb: 'RESOLVED', kind: 'quest-done', value: 'the tracked thread that is now finished', detail: '', note: ''},
+            {verb: 'NPC', kind: 'npc', value: 'name', detail: 'who they are, briefly', note: ''},
+            {verb: 'SCENE', kind: 'scene', value: 'where and when the scene now is', detail: '', note: ''},
+            {verb: 'CONDITION', kind: 'condition', value: 'species', detail: 'ok, hurt, or fainted', note: ''},
             // The card narrates level gains; the panel is where the number
             // actually lives. Without this the two drift apart within a few
             // battles and the player has to reconcile them by hand.
-            `LEVEL | <species> | <her new level, digits only> - only for a moemon already in ${player}'s party whose level the story has changed.`,
+            {verb: 'LEVEL', kind: 'level', value: 'species', detail: 'her new level, digits only', note: `only for a moemon already in ${player}'s party whose level the story has changed.`}
+        ];
+    }
+
+    // What both scans are told before the vocabulary: what is already tracked,
+    // and that only changes to it are wanted. Where the story is differs by
+    // transport - the platform puts the history above the built-in scan's
+    // prompt, while the external one is handed a transcript of its own - so
+    // that much is the caller's to say.
+    buildScanPreamble(anonymizedId: string, where: string): string[] {
+        // buildContextNote already says exactly what's tracked - roster,
+        // scene, open threads, characters - so the scan tells the model what
+        // it already knows in the same words the narrator gets.
+        const tracked = this.buildContextNote(anonymizedId);
+
+        return [
+            `You are reviewing the roleplay ${where} to spot what has changed.`,
+            ``,
+            `Already tracked:`,
+            tracked || '(nothing yet)',
+            ``,
+            `Report only what is NEW or CHANGED versus what is already tracked.`
+        ];
+    }
+
+    // Spelled out rather than left as {{user}}: a scan prompt goes straight
+    // to the model without passing through replaceTags, so a tag here would
+    // reach it unsubstituted.
+    scanPlayerName(anonymizedId: string): string {
+        return this.users[anonymizedId]?.name || 'the player';
+    }
+
+    // What the external model is told. Same preamble and same vocabulary as
+    // the built-in scan; the formatting rules are gone because the schema
+    // enforces the shape now (see External.ts), leaving only meaning.
+    buildExternalScanInstructions(anonymizedId: string): string {
+        const player = this.scanPlayerName(anonymizedId);
+
+        return [
+            ...this.buildScanPreamble(anonymizedId, 'in the message that follows'),
+            `Answer with the findings array. Use these kinds:`,
+            ...this.scanVocabulary(player).map(entry => {
+                const detail = entry.detail ? `detail = <${entry.detail}>` : `leave detail empty`;
+                return `${entry.kind}: value = <${entry.value}>, ${detail}${entry.note ? ` - ${entry.note}` : ''}`;
+            }),
+            ``,
+            `Return an empty findings array if nothing has changed. Report nothing that is already tracked.`
+        ].join('\n');
+    }
+
+    buildScanPrompt(anonymizedId: string): string {
+        // The story itself comes from include_history rather than from the
+        // stage's own log: the platform has the whole chat, while the log is
+        // capped to the recent stretch and is only kept at all when the
+        // external scan is switched on.
+        const player = this.scanPlayerName(anonymizedId);
+
+        return [
+            ...this.buildScanPreamble(anonymizedId, 'above'),
+            `Write one finding per line, in exactly these forms:`,
+            ...this.scanVocabulary(player).map(entry => {
+                const detail = entry.detail ? ` | <${entry.detail}>` : '';
+                return `${entry.verb} | <${entry.value}>${detail}${entry.note ? ` - ${entry.note}` : ''}`;
+            }),
             ``,
             `Write NONE if nothing has changed. Write no other text.`
         ].join('\n');
@@ -750,22 +833,49 @@ export class Stage extends StageBase<InitStateType, ChatStateType, MessageStateT
         this.scanning.add(anonymizedId);
         this.notifySuggestionsChanged();
         try {
-            const response = await this.withTimeout(
-                this.generator.textGen({
-                    prompt: this.buildScanPrompt(anonymizedId),
-                    max_tokens: SCAN_MAX_TOKENS,
-                    // The platform supplies the story; the stage cannot keep
-                    // its own copy across a reload (see buildScanPrompt).
-                    include_history: true
-                }),
-                SCAN_TIMEOUT_MS
-            );
+            let detections: RawDetection[]|null = null;
+            let source: 'external' | 'builtin' = 'builtin';
+            let fellBack = false;
+            let noStoryYet = false;
 
-            // textGen resolves null on failure rather than throwing, so tell
-            // a dead generation apart from one that simply found nothing.
-            if (response?.result == null) return {ok: false, found: 0, reason: 'failed'};
+            if (this.externalScan) {
+                try {
+                    detections = await this.runExternalScan(anonymizedId);
+                    if (detections) source = 'external';
+                    else noStoryYet = true;
+                } catch (error) {
+                    // Everything the external scan can go wrong with - a
+                    // refused key, an exhausted balance, a model that cannot
+                    // honour the schema, a proxy that never answers - has the
+                    // same remedy here, so it is logged for the player's
+                    // console and the chat's own model takes the scan.
+                    console.log(error);
+                    fellBack = true;
+                }
+            }
 
-            const found = this.filterDetections(anonymizedId, parseScanOutput(response.result));
+            if (detections == null) {
+                const response = await this.withTimeout(
+                    this.generator.textGen({
+                        prompt: this.buildScanPrompt(anonymizedId),
+                        max_tokens: SCAN_MAX_TOKENS,
+                        // The platform supplies the story; the stage cannot
+                        // keep its own copy across a reload (see
+                        // buildScanPrompt).
+                        include_history: true
+                    }),
+                    SCAN_TIMEOUT_MS
+                );
+
+                // textGen resolves null on failure rather than throwing, so
+                // tell a dead generation apart from one that simply found
+                // nothing.
+                if (response?.result == null) return {ok: false, found: 0, reason: 'failed', source, fellBack, noStoryYet};
+
+                detections = parseScanOutput(response.result);
+            }
+
+            const found = this.filterDetections(anonymizedId, detections);
 
             // Read through patchChatState rather than a snapshot taken before
             // the await: a panel edit made while the scan was in flight is
@@ -779,13 +889,47 @@ export class Stage extends StageBase<InitStateType, ChatStateType, MessageStateT
                     .filter(dismissal => this.getScanCount(anonymizedId) - dismissal.scan < DISMISSAL_LIFETIME_SCANS),
                 scanCount: this.getScanCount(anonymizedId) + 1
             });
-            return {ok: true, found: found.length};
+            return {ok: true, found: found.length, source, fellBack, noStoryYet};
         } catch (error) {
             console.log(error);
             return {ok: false, found: 0, reason: 'failed'};
         } finally {
             this.scanning.delete(anonymizedId);
             this.notifySuggestionsChanged();
+        }
+    }
+
+    // The external half of a scan. Returns null - rather than throwing - when
+    // there is simply no story to send yet: a chat opened fresh has an empty
+    // log until a turn or two has passed, and that is the built-in scan's
+    // case to take, not a failure to report.
+    //
+    // Throws on anything that is a failure, since the caller treats every one
+    // of them the same way.
+    async runExternalScan(anonymizedId: string): Promise<RawDetection[]|null> {
+        const config = this.externalScan;
+        if (!config) return null;
+
+        const transcript = renderTranscript(this.storyLog);
+        if (!transcript.trim()) return null;
+
+        // Aborted as well as timed out: withTimeout only stops the stage
+        // waiting, and a request left running would still spend the player's
+        // credit on an answer nothing is listening for.
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), SCAN_TIMEOUT_MS);
+        try {
+            return await this.withTimeout(
+                scanExternally(
+                    config,
+                    this.buildExternalScanInstructions(anonymizedId),
+                    transcript,
+                    controller.signal
+                ),
+                SCAN_TIMEOUT_MS
+            );
+        } finally {
+            clearTimeout(timer);
         }
     }
 
@@ -1099,6 +1243,13 @@ export class Stage extends StageBase<InitStateType, ChatStateType, MessageStateT
             promptForId
         } = userMessage;
 
+        // Recorded before either branch below returns, so a chat with the
+        // dice switched off still builds a story for the external scan to
+        // read. What goes in is the player's own text: the roll and the
+        // stage directions are the stage talking to itself, and a scan that
+        // saw them would report the stage's own bookkeeping back to it.
+        this.recordStoryEntry(this.users[anonymizedId]?.name || 'Player', content);
+
         const errorMessage: string|null = null;
         // The player's original message, sent to chat untouched - the roll
         // and its outcome are never written into the visible text or history,
@@ -1141,6 +1292,11 @@ export class Stage extends StageBase<InitStateType, ChatStateType, MessageStateT
     async afterResponseInner(botMessage: Message): Promise<Partial<StageResponse<ChatStateType, MessageStateType>>> {
 
         const narratorResponse = trimTrailingBlock(botMessage.content);
+
+        // The trimmed reply, not the raw one: the stage's own readout is
+        // echoed back by some models, and the scan reading it would be the
+        // stage confirming its own guesses to itself.
+        this.recordStoryEntry(this.characters[botMessage.anonymizedId]?.name || 'Narrator', narratorResponse);
 
         const due: string[] = [];
         for (const user of Object.values(this.users)) {
@@ -1356,6 +1512,10 @@ export class Stage extends StageBase<InitStateType, ChatStateType, MessageStateT
             };
             this.userState[user.anonymizedId] = userState;
         }
+        // Outside the per-player loop: the log is one shared record, so it
+        // rewinds with a swipe exactly like the slots around it but is not
+        // keyed by whoever happened to be swiping.
+        this.storyLog = messageState != null ? parseStoryLog(messageState['storyLog']) : [];
     }
 
     // Reads conditions back from (untyped) message state, dropping keys that
@@ -1399,6 +1559,7 @@ export class Stage extends StageBase<InitStateType, ChatStateType, MessageStateT
                 turnsSinceScan: userState.turnsSinceScan ?? 0
             };
         }
+        messageState['storyLog'] = this.storyLog;
         return messageState;
     }
 

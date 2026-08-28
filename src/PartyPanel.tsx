@@ -509,8 +509,20 @@ function SuggestionsPanel({stage, anonymizedId, refresh}: {
 function describeScan(outcome: ScanOutcome): string {
     if (outcome.reason === 'busy') return 'Already scanning…';
     if (!outcome.ok) return 'Scan failed - try again.';
-    if (outcome.found === 0) return 'Nothing new found.';
-    return outcome.found === 1 ? 'Found 1 change.' : `Found ${outcome.found} changes.`;
+
+    // A player who configured an external model paid for it, so a scan that
+    // quietly handed the work back to the chat's own model says so rather
+    // than reading as a success on the model they chose.
+    const note = outcome.fellBack
+        ? ' (external model failed - used the chat model)'
+        : outcome.noStoryYet
+            // Only reachable with the external scan switched on: the story log
+            // starts empty, so a chat already under way when it was turned on
+            // has nothing to send until a turn or two has passed.
+            ? ' (no story recorded yet - used the chat model)'
+            : '';
+    if (outcome.found === 0) return `Nothing new found.${note}`;
+    return `${outcome.found === 1 ? 'Found 1 change.' : `Found ${outcome.found} changes.`}${note}`;
 }
 
 // Short chips, so the row reads as "PARTY  Growlithe joins the party".

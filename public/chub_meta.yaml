@@ -61,6 +61,15 @@ creator_notes: |
   turns up at the top of the panel as a suggestion with a tick and a cross. There's a Scan now button if you'd rather ask for it directly.
   The scan runs in the background, so nothing waits on it; suggestions simply appear when they're ready.
   <br><br>
+  **Scanning with a model of your own**<br>
+  By default the scan is answered by whatever model is running your chat, which means it answers under no constraint at all - no JSON mode, no
+  schema - so the stage asks for one finding per line and parses what comes back. If you'd rather, you can point the scan at your own model
+  through OpenRouter (or any OpenAI-compatible endpoint) in the settings. That model is held to a JSON schema, so its findings arrive in a fixed
+  shape rather than as text to be picked apart, and it reads a transcript the stage keeps rather than borrowing your chat's context. It costs you
+  a request per scan, and it changes nothing else: findings still land in the panel as suggestions with a tick and a cross. If it fails for any
+  reason - bad key, no credit, a model that can't do structured outputs - the chat's own model takes the scan instead and the panel tells you it
+  did. Note that the key lives in plain stage configuration, so use one you're happy to rotate and set a spending limit on it.
+  <br><br>
   **Carrying a party between chats**<br>
   The panel's "Save data" section exports your roster, bag, threads, characters and scene as a block of text you can paste into another chat
   to pick up where you left off.
@@ -68,6 +77,9 @@ creator_notes: |
   I've tagged the stage NSFW, but there isn't anything in the stage that would render a wholesome chat inappropriate. However, my example bot is NSFW, and I'm sure other bots that attach this stage could be, too.
   <br><br>
   **Updates:**<br>
+  08/28/2026 - The story scan can now be answered by a model of your own on OpenRouter (or any OpenAI-compatible endpoint), held to a JSON schema
+  so its findings come back in a fixed shape instead of as text to parse. Off by default; the settings take a key, a model and an endpoint. Any
+  failure falls back to the chat's own model, and the panel says when it did.<br>
   08/28/2026 - Retuned the whole set to work together. New <b>Prose / Story / RPG</b> switch decides how much of the game shows, and the narrator
   is told which one is in force. Your party now has an <b>active moemon</b> (the star on a row) and a six-member limit, and the roster note the
   narrator gets names her. Conditions set from the panel now survive a reload. Two silent bugs fixed: replies were being truncated at the first
@@ -179,6 +191,56 @@ config_schema:
       minimum: 0
       maximum: 50
       default: 10
+    externalScanEnabled:
+      title: Scan With An External Model
+      description: >-
+        Off by default. When on, the story scan is answered by a model you
+        supply through OpenRouter (or any OpenAI-compatible endpoint) instead
+        of by the model running your chat. The external model is held to a JSON
+        schema, so its findings arrive in a fixed shape rather than as text to
+        be parsed - which is what the built-in scan has to do. It costs you a
+        request per scan. If it fails for any reason, the chat's own model
+        takes the scan and the panel says so.
+      type: boolean
+      default: false
+    externalScanApiKey:
+      title: External Scan API Key
+      description: >-
+        Your OpenRouter key (or the key your endpoint wants). WARNING - this is
+        stored in plain stage configuration, not in a secret store, so anyone
+        who can see this stage's configuration can read it. Use a key you are
+        willing to rotate, with a spending limit set. Only used when the toggle
+        above is on.
+      type: string
+      default: ''
+    externalScanModel:
+      title: External Scan Model
+      description: >-
+        The model to scan with, in your endpoint's own naming - for OpenRouter,
+        something like openai/gpt-4o-mini or google/gemini-2.0-flash-001. It
+        must support structured outputs (JSON schema); a model that does not
+        will fail every scan and fall back to the chat's model.
+      type: string
+      default: 'openai/gpt-4o-mini'
+    externalScanBaseUrl:
+      title: External Scan Endpoint
+      description: >-
+        Where to send the scan. Leave as-is for OpenRouter. Any OpenAI-shaped
+        /chat/completions endpoint works, so you can point this at a proxy of
+        your own and keep the real key off your device. Must be https, and must
+        allow browser requests - the stage runs in your browser, so an endpoint
+        without CORS headers cannot be reached from it.
+      type: string
+      default: 'https://openrouter.ai/api/v1'
+    externalScanMaxTokens:
+      title: External Scan Reply Length
+      description: >-
+        How much room the external model gets for its findings. The default
+        fits a dozen; raise it only if scans look cut off.
+      type: integer
+      minimum: 128
+      maximum: 2048
+      default: 512
 
 # The schema of the state that you store.
 # This isn't needed even if you do store state,
@@ -192,7 +254,14 @@ state_schema:
     properties: {}
   message:
     type: object
-    description: Keyed by player id.
+    description: >-
+      Keyed by player id, plus storyLog - the recent story, shared by everyone
+      in the chat and only recorded when the external scan is switched on.
+    properties:
+      storyLog:
+        type: array
+        items:
+          type: object
     additionalProperties:
       type: object
       properties:

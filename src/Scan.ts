@@ -49,6 +49,11 @@ const VERBS: {[verb: string]: SuggestionKind} = {
     LEVEL: 'level'
 };
 
+// Every kind a detection may carry. Exported so the external scan's schema
+// is generated from this list rather than repeating it - a new verb added to
+// VERBS reaches the schema on its own.
+export const KINDS: SuggestionKind[] = Object.values(VERBS);
+
 // A rambling model shouldn't be able to bury the panel. Well past what a
 // handful of turns can plausibly change.
 const MAX_DETECTIONS = 12;
@@ -56,6 +61,30 @@ const MAX_DETECTIONS = 12;
 // Long enough for a thread or a scene, short enough that a model that starts
 // narrating instead of reporting gets truncated rather than pasted in whole.
 const MAX_FIELD_LENGTH = 200;
+
+// One detection, with every field clamped and the verb resolved. Both the
+// line parser and the structured parser land here, so a finding that arrives
+// as JSON gets exactly the same caps and the same vocabulary as one that
+// arrives as a line - the rest of the stage cannot tell them apart, which is
+// the point: only the transport differs.
+export function toDetection(verb: string, value: string, detail: string): RawDetection|null {
+    // Letters only, so "PARTY:", "**PARTY**" and "party" all land on the
+    // same verb - and so does "quest-done", which arrives from the schema
+    // as a kind rather than a verb.
+    const kind = VERBS[verb.toUpperCase().replace(/[^A-Z]/g, '')] ?? asKind(verb);
+    if (!kind) return null;
+
+    const trimmed = trimField(value);
+    if (!trimmed) return null;
+
+    return {kind, value: trimmed, detail: trimField(detail)};
+}
+
+// Whether a string is already one of the kinds the schema asks for.
+function asKind(value: string): SuggestionKind|null {
+    const candidate = value.trim().toLowerCase();
+    return (KINDS as string[]).includes(candidate) ? candidate as SuggestionKind : null;
+}
 
 export function newSuggestionId(): string {
     return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
@@ -100,16 +129,28 @@ export function parseScanOutput(raw: string | null | undefined): RawDetection[] 
         if (!cleaned) continue;
 
         const fields = cleaned.split('|').map(field => field.trim());
-        // Letters only, so "PARTY:", "**PARTY**" and "party" all land on the
-        // same verb.
-        const verb = fields[0].toUpperCase().replace(/[^A-Z]/g, '');
-        const kind = VERBS[verb];
-        if (!kind) continue;
+        const detection = toDetection(fields[0], fields[1] ?? '', fields[2] ?? '');
+        if (detection) detections.push(detection);
+    }
+    return detections;
+}
 
-        const value = trimField(fields[1] ?? '');
-        if (!value) continue;
+// Reads the structured reply an external model returns under a JSON schema
+// (see External.ts). The schema constrains the shape, but nothing here trusts
+// that it was honoured: a model that ignores the schema, a proxy that rewrites
+// the body, or a reply cut short all arrive as ordinary malformed JSON, and
+// every row is validated exactly as a parsed line would be. A row that does
+// not survive is dropped rather than guessed at.
+export function parseStructuredScan(raw: any): RawDetection[] {
+    const rows = Array.isArray(raw?.findings) ? raw.findings : [];
+    const detections: RawDetection[] = [];
+    for (const row of rows) {
+        if (detections.length >= MAX_DETECTIONS) break;
+        if (!row || typeof row.kind !== 'string' || typeof row.value !== 'string') continue;
 
-        detections.push({kind, value, detail: trimField(fields[2] ?? '')});
+        const detection = toDetection(row.kind, row.value,
+            typeof row.detail === 'string' ? row.detail : '');
+        if (detection) detections.push(detection);
     }
     return detections;
 }
@@ -117,8 +158,6 @@ export function parseScanOutput(raw: string | null | undefined): RawDetection[] 
 // Reads suggestions back from persisted (untyped) chat state, dropping
 // anything malformed - the same defensiveness the rest of the stage's
 // persisted lists get.
-const KINDS: SuggestionKind[] = Object.values(VERBS);
-
 export function parseSuggestions(raw: any): Suggestion[] {
     if (!Array.isArray(raw)) return [];
     return raw
