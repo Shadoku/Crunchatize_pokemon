@@ -682,7 +682,14 @@ export class Stage extends StageBase<InitStateType, ChatStateType, MessageStateT
 
         return [
             ...this.buildScanPreamble(anonymizedId, 'in the message that follows'),
-            `Answer with the findings array. Use these kinds:`,
+            // The schema puts `because` before the verdict; this says what to
+            // put in it. Together they are the whole of the judgement the scan
+            // asks for: a finding nobody can point to a line for is a finding
+            // the model talked itself into.
+            `For each finding, write "because" first: the moment in the story that shows it,`
+            + ` quoted where you can. Then the kind, value and detail. If you cannot point to`
+            + ` something in the story, leave the finding out.`,
+            `Use these kinds:`,
             ...this.scanVocabulary(player).map(entry => {
                 const detail = entry.detail ? `detail = <${entry.detail}>` : `leave detail empty`;
                 return `${entry.kind}: value = <${entry.value}>, ${detail}${entry.note ? ` - ${entry.note}` : ''}`;

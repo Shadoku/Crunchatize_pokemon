@@ -225,14 +225,16 @@ config_schema:
     externalScanModel:
       title: External Scan Model
       description: >-
-        The model to scan with, in your endpoint's own naming - for OpenRouter,
-        something like openai/gpt-4o-mini or google/gemini-2.0-flash-001. It
-        must support structured outputs (JSON schema); a model that does not
-        will fail every scan and fall back to the chat's model. A reasoning
-        model works but is a poor fit here - the scan is a lookup, not a
-        puzzle - and needs a much larger reply length, below.
+        The model to scan with, in your endpoint's own naming. It must support
+        structured outputs (JSON schema); a model that does not will fail every
+        scan and fall back to the chat's model. The scan has to weigh what the
+        prose implies - whether a moemon actually joined you or was only fought
+        - so a capable model reads it better than a small one. Good picks on
+        OpenRouter: google/gemini-2.0-flash-001 (the default), openai/gpt-4.1-mini,
+        anthropic/claude-3.5-haiku. Reasoning models work too; see Scan Thinking
+        below, and give them a much larger reply length.
       type: string
-      default: 'openai/gpt-4o-mini'
+      default: 'google/gemini-2.0-flash-001'
     externalScanEndpoint:
       title: External Scan Endpoint
       description: >-
@@ -245,18 +247,31 @@ config_schema:
         back to OpenRouter.
       type: string
       default: 'openrouter.ai/api/v1'
+    externalScanReasoning:
+      title: Scan Thinking
+      description: >-
+        Whether the scanning model is asked to think before it answers. Off by
+        default, and off is usually right: the scan already has to write down
+        the moment in the story behind every finding before it commits to one,
+        which is most of what thinking would buy, and it costs nothing extra.
+        Turn it up if the scan keeps misreading your story - thinking is spent
+        out of the reply length below, so raise that as well. Models that always
+        reason (DeepSeek R1 and the like) ignore "off" and think regardless.
+      type: string
+      enum: ['off', 'low', 'medium', 'high']
+      default: 'off'
     externalScanMaxTokens:
       title: External Scan Reply Length
       description: >-
         How much room the external model gets for its reply. The default fits a
-        dozen findings. Reasoning models (DeepSeek R1 and the like) need far
-        more, because their thinking is spent out of this same budget before
-        they write any answer at all - if the scan log says the model thought
-        until the budget ran out, raise this to 4000 or more.
+        dozen findings with their reasons. Thinking is spent out of this same
+        budget before any answer is written, so a reasoning model - or Scan
+        Thinking set above off - needs far more: if the scan log says the model
+        thought until the budget ran out, raise this to 4000 or more.
       type: integer
       minimum: 128
       maximum: 8000
-      default: 512
+      default: 1024
 
 # The schema of the state that you store.
 # This isn't needed even if you do store state,

@@ -25,7 +25,18 @@ export interface ExternalScanConfig {
     apiKey: string;
     model: string;
     maxTokens: number;
+    reasoningEffort: ReasoningEffort;
 }
+
+// How hard the model is asked to think before answering. 'off' is the default
+// and suits the scan: the judgement it needs - did she *join*, or was she only
+// fought? - is one careful read of a short passage, and the schema's `because`
+// field already makes the model ground each finding before committing to it.
+// The rest are here because that is a judgement about the task, not a fact
+// about it, and it is the player's model and the player's money.
+export type ReasoningEffort = 'off' | 'low' | 'medium' | 'high';
+
+const REASONING_EFFORTS: ReasoningEffort[] = ['off', 'low', 'medium', 'high'];
 
 // Where OpenRouter lives. A player pointing at a proxy of their own overrides
 // it; anything OpenAI-shaped works, since the request below is the common
@@ -41,7 +52,8 @@ const DEFAULT_ENDPOINT = 'openrouter.ai/api/v1';
 // Same ceiling as the built-in scan's, in the same spirit: the scan reports,
 // it does not narrate. Structured output spends a few more tokens on syntax
 // than a line does, hence the larger default.
-const DEFAULT_MAX_TOKENS = 512;
+// Room for a dozen findings that each carry their evidence, with headroom.
+const DEFAULT_MAX_TOKENS = 1024;
 const MIN_MAX_TOKENS = 128;
 // Well above what the findings themselves need. A reasoning model spends this
 // budget on thinking *before* it writes a single character of the answer, so a
@@ -60,16 +72,36 @@ const SCAN_TEMPERATURE = 0;
 const REFERER = 'https://chub.ai';
 const TITLE = 'Crunchatize';
 
-// OpenRouter's switch for reasoning models. `enabled: false` asks the model
-// not to think at all where that is possible, and `exclude: true` keeps the
-// thinking out of the reply where it isn't - nothing here wants to read it.
+// OpenRouter's reasoning switch, as this stage asks for it.
 //
-// It is only a request. Some models (R1 and its kin) always reason and cannot
-// be talked out of it, and their thinking still counts against max_tokens
-// either way, which is why the ceiling above is what it is. It is also
-// OpenRouter's own parameter: an endpoint that validates its inputs strictly
-// will reject it outright, so postScan retries without it.
-const REASONING_OFF = {enabled: false, exclude: true};
+// Off asks the model not to think at all and to keep any thinking it does out
+// of the reply. Any other setting asks for that much effort and lets the
+// thinking come back in its own field - not to be read, but so the scan log
+// can report how much of the reply budget went on it, which is the number a
+// player needs when tuning the budget.
+//
+// It is only ever a request. Some models (R1 and its kin) always reason and
+// cannot be talked out of it, and their thinking counts against max_tokens
+// either way, which is why the ceiling is what it is. It is also OpenRouter's
+// own parameter: an endpoint that validates its inputs strictly will reject it
+// outright, so postScan retries without it.
+export function reasoningSetting(effort: ReasoningEffort): Record<string, unknown> {
+    // Normalised rather than trusted: a config assembled anywhere but
+    // readExternalConfig - an older one read back, a caller that predates the
+    // field - would otherwise send `effort: undefined`, which asks the
+    // provider to think at a level of its own choosing. Off is the safe read
+    // of "not set", and it is what every path that does not say otherwise
+    // means.
+    const chosen = parseReasoningEffort(effort);
+    return chosen === 'off'
+        ? {enabled: false, exclude: true}
+        : {effort: chosen, exclude: false};
+}
+
+export function parseReasoningEffort(value: unknown): ReasoningEffort {
+    const candidate = typeof value === 'string' ? value.trim().toLowerCase() : '';
+    return (REASONING_EFFORTS as string[]).includes(candidate) ? candidate as ReasoningEffort : 'off';
+}
 
 // The shape the model must answer in. Generated from Scan.ts's own vocabulary,
 // so a verb added there reaches the schema without a second edit here.
@@ -77,6 +109,16 @@ const REASONING_OFF = {enabled: false, exclude: true};
 // Every property is required and additionalProperties is false: strict schema
 // mode rejects a schema that leaves either open, and a model with nothing to
 // say for `detail` writes an empty string rather than omitting the field.
+//
+// `because` comes first on purpose. Fields are generated in the order the
+// schema lists them, so asking for the evidence before the verdict makes the
+// model find a line in the story that supports the finding *before* it commits
+// to one - which is the whole of what reasoning would have bought here, at
+// about thirty tokens a finding and on every model rather than only the ones
+// that think. It also has to survive being written down: "a moemon joined the
+// party" is easy to assert and awkward to quote when nothing in the story
+// says it. Nothing parses this field; it exists to be written, and to be read
+// in the scan log when a finding looks wrong.
 export function buildScanSchema(): Record<string, unknown> {
     return {
         name: 'story_scan',
@@ -92,8 +134,13 @@ export function buildScanSchema(): Record<string, unknown> {
                     items: {
                         type: 'object',
                         additionalProperties: false,
-                        required: ['kind', 'value', 'detail'],
+                        required: ['because', 'kind', 'value', 'detail'],
                         properties: {
+                            because: {
+                                type: 'string',
+                                description: 'First: the moment in the story that shows this, in a few words.'
+                                    + ' Quote it where you can. If nothing in the story shows it, do not report the finding at all.'
+                            },
                             kind: {
                                 type: 'string',
                                 enum: KINDS,
@@ -132,6 +179,7 @@ export function readExternalConfig(config: any, log?: DebugLog): ExternalScanCon
         `externalScanModel: ${describeValue(config?.externalScanModel)}`,
         `externalScanEndpoint: ${describeValue(config?.externalScanEndpoint)}`,
         `externalScanMaxTokens: ${describeValue(config?.externalScanMaxTokens)}`,
+        `externalScanReasoning: ${describeValue(config?.externalScanReasoning)}`,
         // Never the key itself: only whether there is one and how long it is,
         // which is enough to tell "empty" from "pasted with a stray space".
         `externalScanApiKey: ${typeof config?.externalScanApiKey === 'string' && config.externalScanApiKey.trim()
@@ -158,18 +206,20 @@ export function readExternalConfig(config: any, log?: DebugLog): ExternalScanCon
     const baseUrl = normalizeEndpoint(config.externalScanEndpoint);
 
     const maxTokens = Number(config.externalScanMaxTokens);
-    const resolved = {
+    const resolved: ExternalScanConfig = {
         baseUrl,
         apiKey,
         model,
         maxTokens: Number.isFinite(maxTokens)
             ? Math.min(Math.max(Math.round(maxTokens), MIN_MAX_TOKENS), MAX_MAX_TOKENS)
-            : DEFAULT_MAX_TOKENS
+            : DEFAULT_MAX_TOKENS,
+        reasoningEffort: parseReasoningEffort(config.externalScanReasoning)
     };
     log?.info('External scan is on', [
         `endpoint: ${resolved.baseUrl}/chat/completions`,
         `model: ${resolved.model}`,
-        `max tokens: ${resolved.maxTokens}`
+        `max tokens: ${resolved.maxTokens}`,
+        `reasoning: ${resolved.reasoningEffort}`
     ].join('\n'));
     return resolved;
 }
@@ -295,7 +345,7 @@ async function postScan(
         })
     });
 
-    const response = await send({reasoning: REASONING_OFF});
+    const response = await send({reasoning: reasoningSetting(config.reasoningEffort)});
     if (response.status !== 400 && response.status !== 422) return response;
 
     log?.warn(`Endpoint rejected the request with ${response.status}; retrying without the reasoning setting.`);
@@ -322,6 +372,7 @@ export async function scanExternally(
         `POST ${url}`,
         `${transcript.length} characters of story`,
         `reply budget: ${config.maxTokens} tokens`,
+        `reasoning: ${config.reasoningEffort}`,
         '',
         'Instructions sent:',
         instructions,
