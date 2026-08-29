@@ -43,7 +43,11 @@ const DEFAULT_ENDPOINT = 'openrouter.ai/api/v1';
 // than a line does, hence the larger default.
 const DEFAULT_MAX_TOKENS = 512;
 const MIN_MAX_TOKENS = 128;
-const MAX_MAX_TOKENS = 2048;
+// Well above what the findings themselves need. A reasoning model spends this
+// budget on thinking *before* it writes a single character of the answer, so a
+// ceiling sized for the answer alone leaves it truncated mid-thought with an
+// empty reply - which is exactly how a DeepSeek scan fails.
+const MAX_MAX_TOKENS = 8000;
 
 // Nothing creative is being asked for - the model is reading a story it has
 // been handed and reporting what changed - so the sampler is pinned cold. The
@@ -55,6 +59,17 @@ const SCAN_TEMPERATURE = 0;
 // non-OpenRouter endpoint simply ignores them.
 const REFERER = 'https://chub.ai';
 const TITLE = 'Crunchatize';
+
+// OpenRouter's switch for reasoning models. `enabled: false` asks the model
+// not to think at all where that is possible, and `exclude: true` keeps the
+// thinking out of the reply where it isn't - nothing here wants to read it.
+//
+// It is only a request. Some models (R1 and its kin) always reason and cannot
+// be talked out of it, and their thinking still counts against max_tokens
+// either way, which is why the ceiling above is what it is. It is also
+// OpenRouter's own parameter: an endpoint that validates its inputs strictly
+// will reject it outright, so postScan retries without it.
+const REASONING_OFF = {enabled: false, exclude: true};
 
 // The shape the model must answer in. Generated from Scan.ts's own vocabulary,
 // so a verb added there reaches the schema without a second edit here.
@@ -186,6 +201,107 @@ export function isUsableEndpoint(baseUrl: string): boolean {
     }
 }
 
+// What came back, once the useful parts are picked out of the envelope. Kept
+// separate from the parsing so the awkward cases - a reply that is all
+// thinking and no answer, a reply cut off at the token limit - can be named
+// precisely instead of all arriving as "no content".
+export interface ScanReply {
+    content: string;
+    // Thinking, when the provider hands it back in its own field. Never
+    // parsed; only its presence and size are worth knowing, since a scan that
+    // produced nothing but this is a scan that ran out of budget.
+    reasoning: string;
+    // 'length' means the reply was cut off - for a reasoning model, usually
+    // mid-thought and before the answer.
+    finishReason: string;
+}
+
+export function readReply(payload: unknown): ScanReply {
+    const choice = (payload as {choices?: unknown[]} | null)?.choices?.[0] as {
+        message?: {content?: unknown; reasoning?: unknown; reasoning_content?: unknown};
+        finish_reason?: unknown;
+    } | undefined;
+    const message = choice?.message;
+    const text = (value: unknown) => typeof value === 'string' ? value : '';
+    return {
+        content: text(message?.content),
+        // OpenRouter puts it in `reasoning`; DeepSeek's own API calls the same
+        // field `reasoning_content`. Either may turn up depending on which one
+        // the player pointed the stage at.
+        reasoning: text(message?.reasoning) || text(message?.reasoning_content),
+        finishReason: text(choice?.finish_reason)
+    };
+}
+
+// Finds the findings object in whatever the model wrapped it in.
+//
+// Under a JSON schema the content should be bare JSON and usually is. But a
+// reasoning model reached through a provider that does not split its thinking
+// into its own field writes that thinking into the content instead - as a
+// <think> block, or simply as prose before the answer - and models of every
+// sort still reach for a ``` fence out of habit. Rather than trusting the
+// schema was honoured, this takes the outermost {...} span from what is left
+// after the thinking is removed. Returns null when there is no object at all.
+export function extractScanJson(raw: string): string|null {
+    // Thinking first, since a <think> block can itself contain braces - a
+    // model reasoning *about* the JSON it is going to write is the common
+    // case, and taking the first brace would grab an example out of its
+    // notes rather than its answer.
+    const withoutThinking = raw
+        .replace(/<(think|thinking|reasoning)>[\s\S]*?<\/\1>/gi, ' ')
+        // An unclosed tag means the reply was cut off inside the thinking;
+        // everything after it is notes, not an answer.
+        .replace(/<(think|thinking|reasoning)>[\s\S]*$/i, ' ');
+
+    // Fences go before the brace hunt so ```json ... ``` doesn't leave the
+    // closing fence inside the span.
+    const unfenced = withoutThinking.replace(/```[a-z]*\n?/gi, ' ');
+
+    const start = unfenced.indexOf('{');
+    const end = unfenced.lastIndexOf('}');
+    if (start < 0 || end <= start) return null;
+    return unfenced.slice(start, end + 1);
+}
+
+// Posts one scan request. Sends OpenRouter's reasoning switch on the first
+// attempt and, if the endpoint rejects the request outright for it, sends the
+// same request again without it: the parameter is OpenRouter's own, and a
+// strict OpenAI-shaped endpoint answers an unknown field with a 400 rather
+// than ignoring it. Anything else - a bad key, no credit, an unsupported
+// schema - is returned as it came, since retrying would not change it.
+async function postScan(
+    config: ExternalScanConfig,
+    messages: {role: string; content: string}[],
+    signal?: AbortSignal,
+    log?: DebugLog
+): Promise<Response> {
+    const url = `${config.baseUrl}/chat/completions`;
+    const send = (extras: Record<string, unknown>) => fetch(url, {
+        method: 'POST',
+        signal,
+        headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${config.apiKey}`,
+            'HTTP-Referer': REFERER,
+            'X-Title': TITLE
+        },
+        body: JSON.stringify({
+            model: config.model,
+            max_tokens: config.maxTokens,
+            temperature: SCAN_TEMPERATURE,
+            response_format: {type: 'json_schema', json_schema: buildScanSchema()},
+            messages,
+            ...extras
+        })
+    });
+
+    const response = await send({reasoning: REASONING_OFF});
+    if (response.status !== 400 && response.status !== 422) return response;
+
+    log?.warn(`Endpoint rejected the request with ${response.status}; retrying without the reasoning setting.`);
+    return send({});
+}
+
 // Asks the configured model for its findings. Throws on anything that isn't a
 // usable answer - a dead endpoint, a refused key, a model that cannot honour
 // the schema - because the caller's response to all of those is the same: run
@@ -205,6 +321,7 @@ export async function scanExternally(
     log?.info(`Sending scan to ${config.model}`, [
         `POST ${url}`,
         `${transcript.length} characters of story`,
+        `reply budget: ${config.maxTokens} tokens`,
         '',
         'Instructions sent:',
         instructions,
@@ -213,30 +330,14 @@ export async function scanExternally(
         transcript
     ].join('\n'));
 
-    const response = await fetch(url, {
-        method: 'POST',
-        signal,
-        headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${config.apiKey}`,
-            'HTTP-Referer': REFERER,
-            'X-Title': TITLE
-        },
-        body: JSON.stringify({
-            model: config.model,
-            max_tokens: config.maxTokens,
-            temperature: SCAN_TEMPERATURE,
-            response_format: {type: 'json_schema', json_schema: buildScanSchema()},
-            messages: [
-                {role: 'system', content: instructions},
-                // The story arrives as one user turn rather than as replayed
-                // roles: it is material to read, not a conversation to
-                // continue, and a model handed alternating roles tends to
-                // answer the last one instead of reviewing all of them.
-                {role: 'user', content: transcript}
-            ]
-        })
-    });
+    const response = await postScan(config, [
+        {role: 'system', content: instructions},
+        // The story arrives as one user turn rather than as replayed roles:
+        // it is material to read, not a conversation to continue, and a model
+        // handed alternating roles tends to answer the last one instead of
+        // reviewing all of them.
+        {role: 'user', content: transcript}
+    ], signal, log);
 
     if (!response.ok) {
         // The body carries why - an unsupported schema, an exhausted balance,
@@ -249,8 +350,35 @@ export async function scanExternally(
     }
 
     const payload = await response.json();
-    const content = payload?.choices?.[0]?.message?.content;
-    if (typeof content !== 'string' || !content.trim()) {
+    const reply = readReply(payload);
+
+    // What the model actually said, verbatim. This is the entry worth reading
+    // when the scan "worked" but found nothing. Thinking is noted by size
+    // rather than quoted: it can run to thousands of characters and would
+    // bury every other entry in the drawer.
+    log?.info(`${config.model} replied`, [
+        reply.reasoning ? `(plus ${reply.reasoning.length} characters of reasoning, not shown)` : '',
+        reply.content || '(no content)'
+    ].filter(Boolean).join('\n'));
+
+    if (!reply.content.trim()) {
+        // A reasoning model that thought until the budget ran out. This is the
+        // ordinary way a DeepSeek scan fails, and it is fixable from the
+        // settings, so it says so rather than reporting a blank reply.
+        if (reply.reasoning || reply.finishReason === 'length') {
+            log?.error('The model spent its whole reply budget thinking and never wrote an answer.',
+                [
+                    `finish_reason: ${reply.finishReason || '(none given)'}`,
+                    `reasoning returned: ${reply.reasoning.length} characters`,
+                    `reply budget: ${config.maxTokens} tokens`,
+                    '',
+                    'Reasoning counts against the reply budget, so a reasoning model needs a'
+                    + ' much larger one than the findings themselves do. Raise "External Scan'
+                    + ` Reply Length" (up to ${MAX_MAX_TOKENS}), or pick a model that does not reason.`
+                ].join('\n'));
+            throw new Error(`Crunchatize: external scan produced only reasoning (finish_reason ${reply.finishReason || 'unknown'}) - raise the reply length`);
+        }
+
         // The whole payload, since whatever went wrong is in the half that
         // isn't the content: a refusal, a provider error object, an empty
         // choices array.
@@ -258,18 +386,29 @@ export async function scanExternally(
         throw new Error('Crunchatize: external scan returned no content');
     }
 
-    // What the model actually said, verbatim. This is the entry worth reading
-    // when the scan "worked" but found nothing.
-    log?.info(`${config.model} replied`, content);
-
     // Even under a schema this is parsed defensively: strict mode is honoured
-    // by the provider, not guaranteed by it, and a reply that stopped at
-    // max_tokens is truncated JSON no matter what was asked for.
+    // by the provider, not guaranteed by it. A reasoning model reached through
+    // a provider that does not split its thinking out writes it into the
+    // content, so the object is dug out of the reply rather than assumed to be
+    // the whole of it.
+    const json = extractScanJson(reply.content);
+    if (json == null) {
+        // Cut off before the object even closed. Blaming the model's schema
+        // support here would send the player looking in the wrong place.
+        log?.error(reply.finishReason === 'length'
+            ? `Reply was cut off at the ${config.maxTokens}-token limit before the findings were complete. Raise "External Scan Reply Length".`
+            : 'No findings object in the reply - the model may not support structured outputs.');
+        throw new Error('Crunchatize: external scan returned no JSON object');
+    }
+
     let parsed: unknown;
     try {
-        parsed = JSON.parse(content);
+        parsed = JSON.parse(json);
     } catch {
-        log?.error('Reply was not valid JSON - the model may not support structured outputs.');
+        log?.error(reply.finishReason === 'length'
+            ? `Reply was cut off at the ${config.maxTokens}-token limit, leaving incomplete JSON. Raise "External Scan Reply Length".`
+            : 'Reply was not valid JSON - the model may not support structured outputs.',
+            json === reply.content ? undefined : `What was parsed:\n${json}`);
         throw new Error('Crunchatize: external scan returned malformed JSON');
     }
 
