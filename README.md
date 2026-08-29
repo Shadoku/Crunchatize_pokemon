@@ -30,15 +30,25 @@ turn up here and nowhere else.
 
 ## Prose, Story, RPG
 
-The switch at the top of the panel decides how much of the game is showing,
-and it can be flipped mid-scene:
+The switch at the top of the panel is the one crunch control: it decides how
+much of the game is showing *and* whether anything is put to the dice, and it
+can be flipped mid-scene.
 
 - **Prose** — a straight novel. No stat blocks, no dice, nothing adjudicated.
 - **Story** (default) — prose leads; a stat block appears once a battle does.
-- **RPG** — a readout whenever a value moves, and the narrator is sent full
-  movesets so the block and the panel agree.
+  Still no dice.
+- **RPG** — every action is rolled, a readout appears whenever a value moves,
+  and the narrator is sent full movesets so the block and the panel agree.
 
-The narrator is told when the setting changes and not otherwise.
+There used to be a separate Roll/No Roll toggle. It was the same axis said
+twice, so it's gone.
+
+The narrator is told when the setting changes and not otherwise. It is also
+told, every turn and in every mode, never to write a percentage, a roll, a
+check or a line summarising how an attempt went: the stage logs the number and
+the panel shows it, and the reply is just the scene. Left to itself the model
+opens with `76% success — good navigation, smooth return.`, and having written
+one it keeps writing them in modes where nothing was ever rolled.
 
 ## Working on it
 

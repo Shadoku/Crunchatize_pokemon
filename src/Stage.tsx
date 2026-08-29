@@ -160,9 +160,6 @@ export interface ScanOutcome {
 interface ChatPartyState {
     manualParty: PartyMember[];
     inventory: InventoryItem[];
-    // Whether typed messages are put to the dice. Set from the panel, and
-    // ignored in prose mode, which never rolls.
-    rollEnabled: boolean;
     // How much game is showing: prose, story or full RPG. Chat-wide, because
     // it is a table-level agreement about how this chat is being played
     // rather than a fact about any one point in the story.
@@ -198,7 +195,6 @@ interface ChatPartyState {
 const EMPTY_CHAT_STATE: ChatPartyState = {
     manualParty: [],
     inventory: [],
-    rollEnabled: true,
     mode: DEFAULT_MODE,
     pendingConditions: {},
     quests: [],
@@ -1085,16 +1081,11 @@ export class Stage extends StageBase<InitStateType, ChatStateType, MessageStateT
         }
     }
 
-    // Whether the player's next message goes to the dice. Persisted per
-    // player, so the choice survives a reload; defaults to rolling. Prose
-    // mode overrides it: nothing is being adjudicated there.
-    isRollEnabled(anonymizedId: string): boolean {
-        if (!modeRolls(this.getMode())) return false;
-        return this.chatState[anonymizedId]?.rollEnabled ?? true;
-    }
-
-    async setRollEnabled(anonymizedId: string, rollEnabled: boolean): Promise<void> {
-        await this.patchChatState(anonymizedId, {rollEnabled});
+    // Whether the player's next message goes to the dice. This used to be a
+    // toggle of its own; it is now read straight off the play mode, which is
+    // the only thing that ever decided it in practice.
+    isRollEnabled(): boolean {
+        return modeRolls(this.getMode());
     }
 
     // How much game is showing. Chat-wide, and stored in every player's slot
@@ -1288,7 +1279,7 @@ export class Stage extends StageBase<InitStateType, ChatStateType, MessageStateT
 
         // Dice turned off from the panel: the message goes through untouched,
         // with no classification and so no waiting on the classifier either.
-        if (!this.isRollEnabled(anonymizedId)) {
+        if (!this.isRollEnabled()) {
             this.setLastOutcome(anonymizedId, null);
 
             return {

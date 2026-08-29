@@ -1,7 +1,7 @@
 import {ReactElement, useEffect, useState} from "react";
 import type {Stage, ScanOutcome} from "./Stage";
 import {speciesNames, getSpecies, speciesImageUrl} from "./Lore";
-import {PlayMode, PLAY_MODES, MODE_LABELS, MODE_BLURBS, modeRolls} from "./Mode";
+import {PlayMode, PLAY_MODES, MODE_LABELS, MODE_BLURBS} from "./Mode";
 import {anchorFor, onAnchorsLoaded} from "./Portrait";
 import {PartyMember, PartyMemberDetails, DEFAULT_DETAILS, detailsOf, displayNameOf, Condition, MAX_PARTY} from "./Party";
 import {itemCategories} from "./Inventory";
@@ -349,7 +349,6 @@ function PartyBlock({stage, anonymizedId, name, refresh, onViewPortrait}: {
             <InventoryPanel stage={stage} anonymizedId={anonymizedId} refresh={refresh} />
             <QuestPanel stage={stage} anonymizedId={anonymizedId} refresh={refresh} />
             <NpcPanel stage={stage} anonymizedId={anonymizedId} refresh={refresh} />
-            <RollToggle stage={stage} anonymizedId={anonymizedId} refresh={refresh} />
             <LastRoll outcome={stage.getUserState(anonymizedId).lastOutcome} />
             <SavePanel stage={stage} anonymizedId={anonymizedId} refresh={refresh} />
         </div>
@@ -896,54 +895,6 @@ function SavePanel({stage, anonymizedId, refresh}: {
                     )}
                 </div>
             )}
-        </div>
-    );
-}
-
-// Whether the player's typed messages go to the dice. A sticky setting, not
-// a one-shot: it stays where it's put until changed, and is read by
-// beforePrompt when the message actually arrives.
-function RollToggle({stage, anonymizedId, refresh}: {
-    stage: Stage;
-    anonymizedId: string;
-    refresh: () => void;
-}): ReactElement {
-    const rolling = stage.isRollEnabled(anonymizedId);
-    // Prose mode isn't adjudicating anything, so the dice have nothing to
-    // decide. Shown disabled rather than hidden, so the control doesn't
-    // appear and disappear as the mode changes.
-    const available = modeRolls(stage.getMode());
-
-    async function set(value: boolean) {
-        if (value === rolling) return;
-        await stage.setRollEnabled(anonymizedId, value);
-        refresh();
-    }
-
-    return (
-        <div className="crunchatize-rolltoggle">
-            <div className="crunchatize-rolltoggle-header">
-                <span className="crunchatize-rolltoggle-label">Your messages</span>
-                <span className="crunchatize-rolltoggle-hint">
-                    {!available ? 'no rolls in Prose' : rolling ? 'roll a chance of success' : 'no roll'}
-                </span>
-            </div>
-            <div className="crunchatize-rolltoggle-options" role="group" aria-label="Roll for messages">
-                <button
-                    type="button"
-                    className={`crunchatize-rolltoggle-option${rolling ? ' is-active' : ''}`}
-                    aria-pressed={rolling}
-                    disabled={!available}
-                    onClick={() => set(true)}
-                >Roll</button>
-                <button
-                    type="button"
-                    className={`crunchatize-rolltoggle-option${rolling ? '' : ' is-active'}`}
-                    aria-pressed={!rolling}
-                    disabled={!available}
-                    onClick={() => set(false)}
-                >No Roll</button>
-            </div>
         </div>
     );
 }

@@ -25,24 +25,28 @@ creator_notes: |
   the bot will be specifically instructed to take your check result and paraphrase your choices as it narrates, rather than accept your input as canon.
   As a result, you may find that you are better off simply describing the nature or attitude of the action you intend to take and allowing the bot to fill in the details.
   <br><br>
-  Every action rolls a percentage behind the scenes - the chance the attempt comes off - and hands it to the narrator, which reads it as a
-  gradient: a high number goes well, a low one goes badly, and a middling one lands somewhere in between. Nothing is asked to pick a verdict
-  from a list, so nothing gets stuck on one. There's no XP grind or leveling; your 'build' is just whichever moemon you've got with you. The
+  In RPG mode every action rolls a percentage behind the scenes - the chance the attempt comes off - and hands it to the narrator, which reads
+  it as a gradient: a high number goes well, a low one goes badly, and a middling one lands somewhere in between. Nothing is asked to pick a
+  verdict from a list, so nothing gets stuck on one. There's no XP grind or leveling; your 'build' is just whichever moemon you've got with you. The
   number never appears in the chat - only the panel shows it, so the narration reads cleanly while you can still see what you rolled. The
   difficulty setting shifts the number directly: positive is kinder, negative is harsher.
   <br><br>
   **Prose, Story or RPG**<br>
-  The switch at the top of the panel decides how much game is showing, and you can flip it mid-scene. <b>Prose</b> is a straight novel: no stat
-  blocks, no dice, nothing adjudicated. <b>Story</b> (the default) leads with prose and lets a stat block appear once a battle actually starts.
-  <b>RPG</b> shows a readout every time a value moves and sends the narrator your full movesets so the block and the panel agree. The narrator is
-  told when the setting changes and not otherwise, so switching costs one line rather than a running tax.
+  The switch at the top of the panel is the only crunch control, and you can flip it mid-scene. It decides both how much game is showing and
+  whether anything is being rolled for. <b>Prose</b> is a straight novel: no stat blocks, no dice, nothing adjudicated. <b>Story</b> (the
+  default) leads with prose and lets a stat block appear once a battle actually starts, still with nothing put to the dice. <b>RPG</b> rolls
+  every action, shows a readout every time a value moves, and sends the narrator your full movesets so the block and the panel agree. The
+  narrator is told when the setting changes and not otherwise, so switching costs one line rather than a running tax.
+  <br><br>
+  Whichever setting you are on, the narrator is told in as many words never to write a percentage, a roll, a check or a line summarising how
+  your attempt went. The number is the stage's to log and the panel's to show; the reply is just the scene.
   <br><br>
   **Party tracking**<br>
   The stage keeps a little panel (visible alongside the chat) showing each player's current party. Nothing joins it on its own: moemon arrive
   either because you added them by hand, or because the story scan noticed one joining you and you accepted the suggestion. That is deliberate
   - matching every species named in the prose meant every wild moemon, every opponent and every moemon somebody merely mentioned ended up on
   your roster. Six is the limit, same as the card narrates. The star on a row picks your active moemon: she's the one the narrator sends out
-  and the one the stat block leads with. The panel also shows your last roll.
+  and the one the stat block leads with. The panel also shows your last roll, when there was one.
   <br><br>
   **Keeping the story straight**<br>
   Long chats drift. The panel also tracks the things a narrator otherwise forgets once they scroll out of context: open plot threads, the
@@ -77,6 +81,10 @@ creator_notes: |
   I've tagged the stage NSFW, but there isn't anything in the stage that would render a wholesome chat inappropriate. However, my example bot is NSFW, and I'm sure other bots that attach this stage could be, too.
   <br><br>
   **Updates:**<br>
+  08/29/2026 - The Roll/No Roll toggle is gone; the Prose/Story/RPG switch now decides the dice too. Prose and Story put nothing to the
+  dice, RPG rolls every action. The narrator is also told, in every mode and on every turn, never to state a percentage, a roll or a
+  success/failure verdict - it had been opening replies with lines like "76% success - good navigation, smooth return.", and once it
+  started it kept writing them in modes where no dice were ever rolled, inventing the numbers outright.<br>
   08/28/2026 - The story scan can now be answered by a model of your own on OpenRouter (or any OpenAI-compatible endpoint), held to a JSON schema
   so its findings come back in a fixed shape instead of as text to parse. Off by default; the settings take a key, a model and an endpoint. Any
   failure falls back to the chat's own model, and the panel says when it did.<br>
@@ -320,8 +328,6 @@ state_schema:
           type: string
         mode:
           type: string
-        rollEnabled:
-          type: boolean
         scanCount:
           type: integer
 

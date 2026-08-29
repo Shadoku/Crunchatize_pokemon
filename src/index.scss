@@ -747,73 +747,11 @@ $type-colors: (
   }
 }
 
-// Whether typed messages go to the dice. Sits at the bottom of the column,
-// where the old compose box was, next to Chub's own input across the chat.
-.crunchatize-rolltoggle {
-  margin-top: auto;
-  display: flex;
-  flex-direction: column;
-  gap: 0.4rem;
-  padding: 0.5rem;
-  background-color: $surface-raised;
-  border: 1px solid $line;
-  border-left: 3px solid $accent-say;
-  border-radius: 0.45rem;
-}
-
-.crunchatize-rolltoggle-header {
-  display: flex;
-  align-items: baseline;
-  gap: 0.5rem;
-}
-
-.crunchatize-rolltoggle-label {
-  font-size: 0.8rem;
-  font-weight: 700;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: $ink-dim;
-}
-
-.crunchatize-rolltoggle-hint {
-  font-size: 0.75rem;
-  color: $ink-dim;
-  margin-left: auto;
-}
-
-.crunchatize-rolltoggle-options {
-  display: flex;
-  gap: 0.35rem;
-}
-
-.crunchatize-rolltoggle-option {
-  flex: 1;
-  font: inherit;
-  font-size: 0.85rem;
-  font-weight: 700;
-  cursor: pointer;
-  color: $ink-dim;
-  background-color: $surface-sunken;
-  border: 1px solid $line;
-  border-radius: 0.35rem;
-  padding: 0.35rem 0.5rem;
-
-  &:hover { border-color: $ink-dim; }
-
-  // The side currently in force. Green for rolling, amber for not, so the
-  // state reads at a glance rather than needing the label.
-  &.is-active {
-    color: $surface-sunken;
-    border-color: transparent;
-  }
-
-  &:first-child.is-active { background-color: $accent-say; }
-  &:last-child.is-active { background-color: $accent-do; }
-}
-
 // The result of the player's last dice check. Panel-only - the roll and its
 // qualitative outcome never appear in chat or chat history.
 .crunchatize-lastroll {
+  // Pushed to the bottom of the column, where the roll toggle used to sit.
+  margin-top: auto;
   display: flex;
   align-items: baseline;
   flex-wrap: wrap;
